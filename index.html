@@ -1008,9 +1008,9 @@
     <script>
         // --- CONFIGURATION ---
         // CHANGED: Use a specific Local Date (Feb 1st, 2030) instead of UTC "2030-02-01" to match item.start local strings
-        let SIM_START_DATE = new Date(2030, 1, 1); // Feb 1st, 2030 (0-indexed month)
-        let SIM_END_DATE = new Date(2030, 3, 30);  // Apr 30th, 2030
-        let TOTAL_DAYS = (SIM_END_DATE - SIM_START_DATE) / (1000 * 60 * 60 * 24);
+        window.SIM_START_DATE = new Date(2030, 1, 1); // Feb 1st, 2030 (0-indexed month)
+        window.SIM_END_DATE = new Date(2030, 3, 30);  // Apr 30th, 2030
+        window.TOTAL_DAYS = (window.SIM_END_DATE - window.SIM_START_DATE) / (1000 * 60 * 60 * 24);
         
         // --- DATA MODELS ---
         const popCenters = [
@@ -1029,7 +1029,7 @@
             { id: 620, name: "Ban Mi", latlng: [15.00, 100.42], population: 3505 }
         ];
 
-        let routes = [
+        window.routes = [
             { id: 101, name: "MSR WYOMING (A)", aliases: ["Alpha", "A"], color: "#2563eb", weight: 5, opacity: 0.8, points: [[12.66, 100.90], [12.94, 101.08], [13.40, 101.20], [13.98, 101.75], [14.22, 101.25], [14.52, 100.91]], leafletObj: null },
             { id: 108, name: "MSR NEW MEXICO (B)", aliases: ["Bravo", "B"], color: "#06b6d4", weight: 5, opacity: 0.8, points: [[12.66, 100.90], [13.10, 101.10], [13.50, 100.90], [14.05, 100.62], [14.50, 100.70]], leafletObj: null },
             { id: 102, name: "MSR PENNSYLVANIA (C)", aliases: ["Charlie", "C"], color: "#2563eb", weight: 4, opacity: 0.7, points: [[12.66, 100.90], [13.36, 100.98], [13.69, 101.07], [14.05, 100.62], [14.52, 100.91]], leafletObj: null },
@@ -1045,12 +1045,12 @@
             { id: 905, name: "Civ Hwy 2 (East In)", color: "transparent", weight: 0, opacity: 0, points: [[14.97, 102.10], [14.66, 101.42], [14.62, 101.07], [14.71, 100.79]], leafletObj: null }
         ];
 
-        let opsGraphics = [
+        window.opsGraphics = [
             { id: 501, name: "PL BLACK", type: "line", color: "#000000", dashArray: "10,5", weight: 3, points: [[15.25, 99.80], [15.20, 100.15], [15.15, 100.60]], leafletObj: null },
             { id: 502, name: "PL BLUE", type: "line", color: "#0000FF", dashArray: "10,5", weight: 3, points: [[15.05, 102.20], [14.95, 102.50]], leafletObj: null }
         ];
 
-        let events = [
+        window.events = [
             { id: 1, name: "CNY Wave (Main North)", type: "route-flow", routeId: 901, direction: "forward", start: new Date(2030, 1, 4), end: new Date(2030, 1, 18), intensity: 0.9, trailLength: 0.25 },
             { id: 2, name: "CNY Wave (BKK Core)", type: "route-flow", routeId: 902, direction: "forward", start: new Date(2030, 1, 8), end: new Date(2030, 1, 20), intensity: 0.7, trailLength: 0.2 },
             { id: 3, name: "CNY Wave (East BKK)", type: "route-flow", routeId: 903, direction: "forward", start: new Date(2030, 1, 8), end: new Date(2030, 1, 20), intensity: 0.6, trailLength: 0.2 },
@@ -1063,7 +1063,7 @@
             { id: 15, name: "Festival Outflow (East)", type: "route-flow", routeId: 905, direction: "reverse", start: new Date(2030, 2, 22), end: new Date(2030, 3, 5), intensity: 0.6, trailLength: 0.25 }
         ];
 
-        let milAreas = [
+        window.milAreas = [
             { id: 301, name: "SPOD1 Sattahip", type: "point", color: "#333333", latlng: [12.666, 100.900], leafletObj: null, isVisible: true },
             { id: 302, name: "SPOD2 Tung Prong", type: "point", color: "#333333", latlng: [12.69, 100.86], leafletObj: null, isVisible: true },
             { id: 303, name: "SPOD4 Juksamet", type: "point", color: "#333333", latlng: [12.61, 100.92], leafletObj: null, isVisible: true },
