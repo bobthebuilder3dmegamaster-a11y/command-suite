@@ -3,13 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Integrated Command Suite (Multi-User)</title>
+    <title>Integrated Command Suite</title>
     
-    <!-- --- FIREBASE (THE MULTI-USER BRAIN) --- -->
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-
     <!-- --- LIBRARIES FOR APP 1 (REACT) --- -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -22,6 +17,7 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- GIF.js for recording -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
 
     <!-- SHARED CSS -->
@@ -125,13 +121,6 @@
         #recording-overlay.hidden {
             display: none !important;
         }
-        
-        /* Connection Status Indicator */
-        #connection-status {
-            width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px;
-        }
-        .status-online { background-color: #22c55e; box-shadow: 0 0 5px #22c55e; }
-        .status-offline { background-color: #ef4444; box-shadow: 0 0 5px #ef4444; }
     </style>
 </head>
 <body>
@@ -144,9 +133,6 @@
                     <div class="flex items-center gap-2">
                         <i class="fas fa-shield-alt text-blue-400 text-xl"></i>
                         <span class="font-bold text-lg tracking-wider">COMMAND SUITE</span>
-                        <span class="text-[10px] bg-slate-800 px-2 py-1 rounded ml-2 flex items-center border border-slate-700">
-                            <div id="connection-status" class="status-offline"></div> <span id="status-text">Connecting...</span>
-                        </span>
                     </div>
                     
                     <div class="flex space-x-4">
@@ -434,50 +420,16 @@
 
     <!-- 
     ========================================
-    LOGIC SECTION 1: GLOBAL & MAP
+    LOGIC SECTION 1: MAIN NAVIGATION & GLOBAL SAVE/LOAD
     ======================================== 
     -->
     <script>
-        // --- FIREBASE SETUP (Consolidated to one location for stability) ---
-        const firebaseConfig = {
-            apiKey: "AIzaSyChXwgbOR2M5iib9jx9LOX4ZF5BxYOO8q8",
-            authDomain: "movementapplication-5a6d9.firebaseapp.com",
-            projectId: "movementapplication-5a6d9",
-            storageBucket: "movementapplication-5a6d9.firebasestorage.app",
-            messagingSenderId: "251843179594",
-            appId: "1:251843179594:web:1526b6a8ee648cc03862b3",
-            measurementId: "G-3TBJT4VXWW"
+        // Store React accessors globally
+        window.REACT_ACCESSORS = {
+            getData: () => [],
+            setData: (d) => {}
         };
 
-        // Initialize Firebase immediately and attach to window
-        if (typeof firebase !== 'undefined' && !firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-            window.db = firebase.firestore();
-            window.auth = firebase.auth();
-            console.log("Firebase initialized successfully");
-        } else if (typeof firebase === 'undefined') {
-            console.error("Firebase SDK not loaded");
-        } else {
-            // Already initialized
-            window.db = firebase.firestore();
-            window.auth = firebase.auth();
-        }
-
-        // --- REACT ACCESSORS ---
-        window.REACT_ACCESSORS = { getData: () => [], setData: (d) => {} };
-
-        // --- GLOBAL VARIABLES FOR MAP ---
-        let map;
-        let heatLayer;
-        let currentDayIndex = 24.9; 
-        let routeLayerGroup, milLayerGroup, popLayerGroup, opsLayerGroup, heatLayerGroup, milMovementsLayerGroup;
-        let isPlaying = false, playInterval, playbackSpeed = 500;
-        
-        let SIM_START_DATE = new Date(2030, 1, 1); 
-        let SIM_END_DATE = new Date(2030, 3, 30);  
-        let TOTAL_DAYS = (SIM_END_DATE - SIM_START_DATE) / (1000 * 60 * 60 * 24);
-
-        // --- NAVIGATION ---
         function switchMasterView(view) {
             const app1 = document.getElementById('app-1-wrapper');
             const app2 = document.getElementById('app-2-wrapper');
@@ -485,48 +437,147 @@
             const btn2 = document.getElementById('btn-app2');
 
             if (view === 'app1') {
-                app1.classList.remove('hidden-view'); app2.classList.add('hidden-view');
+                app1.classList.remove('hidden-view');
+                app2.classList.add('hidden-view');
                 btn1.classList.replace('text-gray-300', 'bg-blue-600'); btn1.classList.replace('hover:bg-slate-700', 'text-white');
                 btn2.classList.replace('bg-blue-600', 'text-gray-300'); btn2.classList.replace('text-white', 'hover:bg-slate-700');
             } else {
-                app1.classList.add('hidden-view'); app2.classList.remove('hidden-view');
+                app1.classList.add('hidden-view');
+                app2.classList.remove('hidden-view');
                 btn2.classList.replace('text-gray-300', 'bg-blue-600'); btn2.classList.replace('hover:bg-slate-700', 'text-white');
                 btn1.classList.replace('bg-blue-600', 'text-gray-300'); btn1.classList.replace('text-white', 'hover:bg-slate-700');
-                setTimeout(() => { if (window.map && typeof window.map.invalidateSize === 'function') window.map.invalidateSize(); }, 100);
+                
+                // FIX: Check if window.map is actually the Leaflet instance before calling method
+                // This prevents the error where window.map might reference the DOM element <div id="map">
+                setTimeout(() => { 
+                    if (window.map && typeof window.map.invalidateSize === 'function') {
+                        window.map.invalidateSize(); 
+                    }
+                }, 100);
             }
         }
 
-        // --- LOCAL BACKUP SAVE (Still useful for export) ---
+        // --- GLOBAL SAVE ---
         function handleGlobalSave() {
             const ganttData = window.REACT_ACCESSORS.getData();
             const cleanEvents = window.events.map(e => ({ ...e, start: e.start.toISOString(), end: e.end.toISOString() }));
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({gantt: ganttData, mapEvents: cleanEvents}, null, 2));
-            const a = document.createElement('a'); a.href = dataStr; a.download = `Backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
+            const cleanRoutes = window.routes.map(r => { const { leafletObj, ...rest } = r; return rest; });
+            const cleanMilAreas = window.milAreas.map(m => { const { leafletObj, isVisible, ...rest } = m; return { ...rest, isVisible: m.isVisible !== false }; });
+
+            const globalData = {
+                timestamp: new Date().toISOString(),
+                gantt: ganttData,
+                map: {
+                    config: { start: window.SIM_START_DATE.toISOString(), end: window.SIM_END_DATE.toISOString() },
+                    events: cleanEvents,
+                    routes: cleanRoutes,
+                    milAreas: cleanMilAreas
+                }
+            };
+
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(globalData, null, 2));
+            const a = document.createElement('a'); a.href = dataStr; a.download = `CommandSuite_FullSave_${new Date().toISOString().slice(0,10)}.json`; a.click();
+        }
+
+        // --- GLOBAL LOAD ---
+        function handleGlobalLoad(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (data.gantt && window.REACT_ACCESSORS.setData) {
+                        window.REACT_ACCESSORS.setData(data.gantt);
+                    }
+                    if (data.map) {
+                        // FIXED: Re-parse dates properly, especially considering previous UTC/Local fix
+                        // Just use year/month/day parts to recreate local date object to match default
+                        const startParts = data.map.config.start.split('T')[0].split('-');
+                        window.SIM_START_DATE = new Date(startParts[0], startParts[1]-1, startParts[2]);
+                        
+                        const endParts = data.map.config.end.split('T')[0].split('-');
+                        window.SIM_END_DATE = new Date(endParts[0], endParts[1]-1, endParts[2]);
+                        
+                        window.TOTAL_DAYS = (window.SIM_END_DATE - window.SIM_START_DATE) / (1000 * 60 * 60 * 24);
+                        
+                        document.getElementById('sim-start-input').value = data.map.config.start.split('T')[0];
+                        document.getElementById('sim-end-input').value = data.map.config.end.split('T')[0];
+                        document.getElementById('timeline').max = window.TOTAL_DAYS;
+                        
+                        window.events = data.map.events.map(ev => ({ ...ev, start: new Date(ev.start), end: new Date(ev.end) }));
+                        
+                        window.routes.forEach(r => { if(r.leafletObj) window.routeLayerGroup.removeLayer(r.leafletObj); });
+                        window.milAreas.forEach(m => { if(m.leafletObj) window.milLayerGroup.removeLayer(m.leafletObj); });
+                        
+                        window.routes = data.map.routes.map(r => ({ ...r, leafletObj: null }));
+                        window.milAreas = data.map.milAreas.map(m => ({ ...m, leafletObj: null, isVisible: m.isVisible !== false }));
+                        
+                        window.initRoutes(); window.initMilAreas(); window.renderEventList(); window.renderRouteList(); window.renderMilList(); window.resetTimeline();
+                        
+                        // Force update of gradient
+                        setTimeout(updateTimelineGradient, 500);
+                    }
+                    alert("Scenario & Gantt Data Loaded Successfully!");
+                } catch (err) { console.error(err); alert("Error loading file. Check format."); }
+            };
+            reader.readAsText(file);
+            input.value = '';
         }
     </script>
 
     <!-- 
     ========================================
-    LOGIC SECTION 2: APP 1 (REACT + FIREBASE)
+    LOGIC SECTION 2: APP 1 (REACT GANTT)
     ======================================== 
     -->
     <script type="text/babel">
         const { useState, useMemo, useRef, useEffect } = React;
 
-        // --- INITIAL SEED DATA (Only used if DB is empty) ---
-        const INITIAL_SEED_DATA = [
+        // --- Initial Data ---
+        const INITIAL_DATA = [
             { id: 1, route: 'Bravo', serial: 'B8405', brigade: '2/1', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 645, readiness: 100, remarks: '', start: '2030-02-25T21:30', end: '2030-02-26T05:30' },
             { id: 2, route: 'Alpha', serial: 'A8408', brigade: '2/1 HET', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 267, readiness: 85, remarks: '', start: '2030-02-25T21:30', end: '2030-02-26T07:00' },
             { id: 3, route: 'Alpha', serial: 'A8501', brigade: '1/2', unit: '25ID', origin: 'CP LOYALTY', destination: 'CSC BUC-EE\'S', vic_count: 734, readiness: 100, remarks: 'Remain until 1900', start: '2030-02-26T18:30', end: '2030-02-27T03:00' },
             { id: 4, route: 'Alpha', serial: 'A8505', brigade: '1/2', unit: '25ID', origin: 'CSC BUC-EE\'S', destination: 'CP COURAGE A', vic_count: 734, readiness: 100, remarks: 'HET Return', start: '2030-02-26T19:00', end: '2030-02-27T03:30' },
             { id: 5, route: 'Bravo', serial: 'B8502', brigade: '2/1', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE B', vic_count: 645, readiness: 50, remarks: '', start: '2030-02-26T19:00', end: '2030-02-27T03:30' },
             { id: 6, route: 'Alpha', serial: 'A8506', brigade: '2/1 HET', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE B', vic_count: 801, readiness: 100, remarks: '', start: '2030-02-26T19:30', end: '2030-02-27T07:00' },
-            { id: 7, route: 'Charlie', serial: 'C8506', brigade: 'Qtr Party', unit: '25ID', origin: 'CP BLUE', destination: 'CP COURAGE B', vic_count: 334, readiness: 100, remarks: '', start: '2030-02-26T21:30', end: '2030-02-27T02:00' }
+            { id: 7, route: 'Charlie', serial: 'C8506', brigade: 'Qtr Party', unit: '25ID', origin: 'CP BLUE', destination: 'CP COURAGE B', vic_count: 334, readiness: 100, remarks: '', start: '2030-02-26T21:30', end: '2030-02-27T02:00' },
+            { id: 8, route: 'Charlie', serial: 'C8603', brigade: 'Qtr Party', unit: '25ID', origin: 'CP BLUE', destination: 'CP COURAGE B', vic_count: 356, readiness: 90, remarks: '', start: '2030-02-27T19:30', end: '2030-02-27T23:30' },
+            { id: 9, route: 'Alpha', serial: 'A8606', brigade: '2/1', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 668, readiness: 100, remarks: 'HET Return', start: '2030-02-27T20:00', end: '2030-02-28T07:00' },
+            { id: 10, route: 'Bravo', serial: 'B8604', brigade: '3/25', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE B', vic_count: 489, readiness: 100, remarks: '', start: '2030-02-27T23:00', end: '2030-02-28T07:00' },
+            { id: 11, route: 'Alpha', serial: 'A8702', brigade: 'DSB', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 979, readiness: 75, remarks: 'Remain until 1900', start: '2030-02-28T00:30', end: '2030-02-28T07:00' },
+            { id: 12, route: 'Alpha', serial: 'A8705', brigade: 'DSB', unit: '25ID', origin: 'CSC BUC-EE\'S', destination: 'CP COURAGE A', vic_count: 1024, readiness: 100, remarks: '', start: '2030-02-28T19:00', end: '2030-03-01T04:30' },
+            { id: 13, route: 'Charlie', serial: 'C8703', brigade: '', unit: '25ID', origin: 'CP BLUE', destination: 'CP COURAGE B', vic_count: 334, readiness: 100, remarks: '', start: '2030-02-28T19:00', end: '2030-02-28T23:30' },
+            { id: 14, route: 'Alpha', serial: 'A8707', brigade: '2-1 (13) HET', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 267, readiness: 100, remarks: '', start: '2030-02-28T21:30', end: '2030-03-01T07:00' },
+            { id: 15, route: 'Bravo', serial: 'B8704', brigade: '3/25', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE B', vic_count: 378, readiness: 100, remarks: '', start: '2030-02-28T23:30', end: '2030-03-01T07:00' },
+            { id: 16, route: 'Alpha', serial: 'A8806', brigade: 'CAB', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 668, readiness: 60, remarks: '', start: '2030-03-01T20:30', end: '2030-03-02T07:00' },
+            { id: 17, route: 'Alpha', serial: 'A8901', brigade: '1/2', unit: '25ID', origin: 'CP LOYALTY', destination: 'CSC BUC-EE\'S', vic_count: 734, readiness: 100, remarks: 'Remain until 1900', start: '2030-03-02T01:30', end: '2030-03-02T07:00' },
+            { id: 18, route: 'Charlie', serial: 'C8902', brigade: '', unit: '25ID', origin: 'CP BLUE', destination: 'CP COURAGE B', vic_count: 311, readiness: 100, remarks: '', start: '2030-03-02T02:30', end: '2030-03-02T07:00' },
+            { id: 19, route: 'Alpha', serial: 'A8906', brigade: '1/2', unit: '25ID', origin: 'CSC BUC-EE\'S', destination: 'CP COURAGE A', vic_count: 756, readiness: 100, remarks: '', start: '2030-03-02T19:00', end: '2030-03-03T03:30' },
+            { id: 20, route: 'Alpha', serial: 'A8907', brigade: '158 MEB', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 534, readiness: 100, remarks: '', start: '2030-03-02T20:30', end: '2030-03-03T01:00' },
+            { id: 21, route: 'Charlie', serial: 'C8905', brigade: '', unit: '25ID', origin: 'CP BLUE', destination: 'CP COURAGE B', vic_count: 334, readiness: 100, remarks: '', start: '2030-03-02T20:30', end: '2030-03-03T01:00' },
+            { id: 22, route: 'Bravo', serial: 'B8903', brigade: '3/25 & 1/2', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE B', vic_count: 645, readiness: 100, remarks: '', start: '2030-03-02T21:30', end: '2030-03-03T06:00' },
+            { id: 23, route: 'Charlie', serial: 'C9004', brigade: '', unit: '25ID', origin: 'CP BLUE', destination: 'CP COURAGE B', vic_count: 356, readiness: 100, remarks: '', start: '2030-03-03T19:00', end: '2030-03-03T23:30' },
+            { id: 24, route: 'Alpha', serial: 'A9006', brigade: '2/1', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 668, readiness: 100, remarks: '', start: '2030-03-03T19:30', end: '2030-03-04T06:30' },
+            { id: 25, route: 'Bravo', serial: 'B9102', brigade: 'Alibi', unit: '25ID', origin: 'CP COURAGE B', destination: 'CP LOYALTY', vic_count: 779, readiness: 100, remarks: '', start: '2030-03-04T19:00', end: '2030-03-05T04:00' },
+            { id: 26, route: 'Alpha', serial: 'A9108', brigade: '158 MEB', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 668, readiness: 100, remarks: '', start: '2030-03-04T20:00', end: '2030-03-05T07:00' },
+            { id: 27, route: 'Alpha', serial: 'A9201', brigade: '158 MEB & DSB', unit: '25ID', origin: 'CP LOYALTY', destination: 'CSC BUC-EE\'S', vic_count: 712, readiness: 100, remarks: 'Remain until 1900', start: '2030-03-05T01:30', end: '2030-03-05T07:00' },
+            { id: 28, route: 'Charlie', serial: 'C9202', brigade: '', unit: '25ID', origin: 'CP BLUE', destination: 'CP COURAGE B', vic_count: 311, readiness: 100, remarks: '', start: '2030-03-05T06:00', end: '2030-03-05T10:30' },
+            { id: 29, route: 'Alpha', serial: 'A9206', brigade: '158 MEB & DSB', unit: '25ID', origin: 'CSC BUC-EE\'S', destination: 'CP COURAGE A', vic_count: 756, readiness: 100, remarks: '', start: '2030-03-05T19:00', end: '2030-03-06T03:30' },
+            { id: 30, route: 'Charlie', serial: 'C9206', brigade: '', unit: '25ID', origin: 'CP BLUE', destination: 'CP COURAGE B', vic_count: 334, readiness: 100, remarks: '', start: '2030-03-05T20:30', end: '2030-03-06T07:00' },
+            { id: 31, route: 'Bravo', serial: 'B9205', brigade: 'Alibi', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE B', vic_count: 512, readiness: 100, remarks: '', start: '2030-03-05T23:00', end: '2030-03-06T07:00' },
+            { id: 32, route: 'Alpha', serial: 'A9305', brigade: 'CAB', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 935, readiness: 100, remarks: '', start: '2030-03-06T19:00', end: '2030-03-07T07:00' },
+            { id: 33, route: 'Bravo', serial: 'B9302', brigade: 'Alibi', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE B', vic_count: 756, readiness: 100, remarks: '', start: '2030-03-06T19:00', end: '2030-03-07T04:00' },
+            { id: 34, route: 'Charlie', serial: 'C9304', brigade: '', unit: '25ID', origin: 'CP BLUE', destination: 'CP COURAGE B', vic_count: 334, readiness: 100, remarks: '', start: '2030-03-06T19:00', end: '2030-03-06T23:30' },
+            { id: 35, route: 'Alpha', serial: 'A9401', brigade: 'Alibi', unit: '25ID', origin: 'CSC BUC-EE\'S', destination: 'CP COURAGE A', vic_count: 712, readiness: 100, remarks: 'Remain until 1900', start: '2030-03-07T01:30', end: '2030-03-07T07:00' },
+            { id: 36, route: 'Alpha', serial: 'A9405', brigade: 'Alibi', unit: '25ID', origin: 'CSC BUC-EE\'S', destination: 'CP COURAGE A', vic_count: 756, readiness: 100, remarks: '', start: '2030-03-07T19:00', end: '2030-03-08T03:30' },
+            { id: 37, route: 'Alpha', serial: 'A9406', brigade: 'Alibi', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE A', vic_count: 155, readiness: 100, remarks: '', start: '2030-03-07T20:30', end: '2030-03-08T04:30' },
+            { id: 38, route: 'Bravo', serial: 'B9405', brigade: 'Alibi', unit: '25ID', origin: 'CP LOYALTY', destination: 'CP COURAGE B', vic_count: 378, readiness: 100, remarks: '', start: '2030-03-07T23:30', end: '2030-03-08T07:00' }
         ];
 
-        // --- HELPER: Colors ---
+        // --- Helper Functions ---
         const getRouteColor = (route) => {
-            if (!route) return { fill: '#64748b', bg: '#e2e8f0', stroke: '#0f172a', text: '#0f172a' };
             const r = route.toLowerCase();
             if (r.includes('bravo')) return { fill: '#16a34a', bg: '#bbf7d0', stroke: '#14532d', text: '#14532d' }; 
             if (r.includes('charlie')) return { fill: '#ea580c', bg: '#fed7aa', stroke: '#7c2d12', text: '#7c2d12' }; 
@@ -541,112 +592,38 @@
             return d.toISOString().slice(0, 16);
         };
 
-        // --- MAIN REACT COMPONENT ---
+        // --- Main Application ---
         const App = () => {
-            const [data, setData] = useState([]); // Start empty, fill from DB
+            const [data, setData] = useState(INITIAL_DATA);
             const [activeTab, setActiveTab] = useState('gantt'); 
             const [zoom, setZoom] = useState(1.0); 
+            const chartRef = useRef(null);
             const exportRef = useRef(null); 
 
-            // 1. AUTHENTICATION & SYNC
+            // Expose State to Global Scope
             useEffect(() => {
-                const initSync = async () => {
-                    try {
-                        const auth = window.auth;
-                        const db = window.db;
+                window.REACT_ACCESSORS.getData = () => data;
+                window.REACT_ACCESSORS.setData = (newData) => setData(newData);
+                // Trigger map update when data changes
+                if(window.updateTimelineGradient) setTimeout(window.updateTimelineGradient, 100);
+            }, [data]);
 
-                        if (!auth || !db) throw new Error("Firebase not initialized globally");
-
-                        // Sign in anonymously
-                        await auth.signInAnonymously();
-                        
-                        // Update Status UI
-                        const statusEl = document.getElementById('connection-status');
-                        const statusText = document.getElementById('status-text');
-                        if(statusEl) { statusEl.className = 'status-online'; statusText.innerText = 'Connected'; }
-
-                        // Check if DB is empty, if so, seed it
-                        const snapshot = await db.collection('movements').get();
-                        if (snapshot.empty) {
-                            console.log("Database empty. Seeding initial data...");
-                            const batch = db.batch();
-                            INITIAL_SEED_DATA.forEach(doc => {
-                                const ref = db.collection('movements').doc(doc.id.toString());
-                                batch.set(ref, doc);
-                            });
-                            await batch.commit();
-                        }
-
-                        // Subscribe to Realtime Updates
-                        const unsubscribe = db.collection('movements').onSnapshot(snap => {
-                            const cloudData = snap.docs.map(doc => {
-                                return { id: parseInt(doc.id), ...doc.data() };
-                            });
-                            // Sort by ID to keep table stable
-                            cloudData.sort((a,b) => a.id - b.id);
-                            
-                            setData(cloudData);
-                            // Update Global Accessor for Map
-                            window.REACT_ACCESSORS.getData = () => cloudData;
-                            // Trigger Gradient Update
-                            if(window.updateTimelineGradient) window.updateTimelineGradient();
-                        }, (error) => {
-                            console.error("Firestore Listen Error:", error);
-                            alert("Database Error: Check Console. Did you enable Firestore Test Mode?");
-                        });
-
-                        return () => unsubscribe();
-
-                    } catch (err) {
-                        console.error("Auth/Sync Error:", err);
-                        const statusText = document.getElementById('status-text');
-                        if(statusText) statusText.innerText = 'Error';
-                    }
-                };
-
-                initSync();
-            }, []);
-
-            // 2. DATABASE WRITE FUNCTIONS
-            const handleUpdate = async (id, field, value) => {
-                try {
-                    if(window.db) await window.db.collection('movements').doc(id.toString()).update({ [field]: value });
-                } catch (e) {
-                    console.error("Error updating document: ", e);
-                }
+            // Handle Data Edits
+            const handleUpdate = (id, field, value) => {
+                const newData = data.map(item => 
+                    item.id === id ? { ...item, [field]: value } : item
+                );
+                setData(newData);
             };
 
-            const handleAddRow = async () => {
-                const newId = data.length > 0 ? Math.max(...data.map(d => d.id)) + 1 : 1;
-                const newRow = {
-                    id: newId,
-                    route: 'Alpha', 
-                    serial: `NEW-${newId}`,
-                    brigade: 'New Unit',
-                    unit: '25ID',
-                    origin: 'CP LOYALTY',
-                    destination: 'CP COURAGE A',
-                    vic_count: 10,
-                    readiness: 100,
-                    remarks: '',
-                    start: "2030-02-28T12:00",
-                    end: "2030-03-01T12:00"
-                };
-                try {
-                    if(window.db) await window.db.collection('movements').doc(newId.toString()).set(newRow);
-                } catch (e) { console.error("Error adding doc: ", e); }
-            };
-
-            const handleDeleteRow = async (id) => {
-                try {
-                    if(window.db) await window.db.collection('movements').doc(id.toString()).delete();
-                } catch (e) { console.error("Error deleting doc: ", e); }
-            };
-
-            // --- VIEW LOGIC (Same as before) ---
             const handleExport = async () => {
                 if (exportRef.current) {
-                    const canvas = await html2canvas(exportRef.current, { scale: 2, backgroundColor: '#ffffff', logging: false });
+                    const canvas = await html2canvas(exportRef.current, { 
+                        scale: 2, 
+                        backgroundColor: '#ffffff',
+                        logging: false
+                    });
+                    
                     const link = document.createElement('a');
                     link.download = `movement-matrix-${new Date().toISOString().slice(0,10)}.png`;
                     link.href = canvas.toDataURL('image/png');
@@ -656,50 +633,87 @@
 
             const { minTime, maxTime, totalDuration } = useMemo(() => {
                 if (data.length === 0) return { minTime: new Date(), maxTime: new Date(), totalDuration: 1 };
+                
                 const times = data.flatMap(d => [new Date(d.start).getTime(), new Date(d.end).getTime()]);
-                let min = Math.min(...times); let max = Math.max(...times);
+                let min = Math.min(...times);
+                let max = Math.max(...times);
+
                 const BUFFER = 24 * 60 * 60 * 1000;
-                min -= BUFFER; max += BUFFER;
+                min -= BUFFER;
+                max += BUFFER;
+
                 return { minTime: min, maxTime: max, totalDuration: max - min };
             }, [data]);
 
             const groupedData = useMemo(() => {
                 const groups = {};
-                data.forEach(item => { const r = item.route || 'Unassigned'; if (!groups[r]) groups[r] = []; groups[r].push(item); });
+                data.forEach(item => {
+                    const r = item.route || 'Unassigned';
+                    if (!groups[r]) groups[r] = [];
+                    groups[r].push(item);
+                });
                 return groups;
             }, [data]);
 
             const sortedRoutes = useMemo(() => Object.keys(groupedData).sort(), [groupedData]);
 
-            // --- VIEWS ---
+            // --- Sub-Components ---
+
             const TableView = () => (
                 <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex flex-col h-[calc(100vh-180px)]">
-                    <div className="bg-gray-50 border-b border-gray-200 p-2 flex justify-between items-center">
-                        <span className="text-sm font-bold text-gray-700 uppercase tracking-wider ml-2">Data Editor (Cloud Sync)</span>
-                        <button onClick={handleAddRow} className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-1 px-3 rounded flex items-center gap-1 transition shadow-sm"><i className="fas fa-plus"></i> Add</button>
-                    </div>
                     <div className="overflow-auto flex-1">
                         <table className="min-w-full text-sm text-left relative">
                             <thead className="bg-gray-800 text-white font-bold uppercase text-xs sticky top-0 z-10">
                                 <tr>
-                                    {['Route','Serial','Brigade','Origin','Destination','VIC','Readiness','Start','End','Remarks',''].map(h=><th key={h} className="px-4 py-3 whitespace-nowrap">{h}</th>)}
+                                    <th className="px-4 py-3 whitespace-nowrap">Route</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">Serial</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">Brigade</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">Origin</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">Destination</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">VIC Count</th>
+                                    <th className="px-4 py-3 whitespace-nowrap text-center">Readiness %</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">Start Time</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">End Time</th>
+                                    <th className="px-4 py-3 whitespace-nowrap">Remarks</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200 text-gray-700">
                                 {data.map((row) => (
-                                    <tr key={row.id} className="hover:bg-gray-50 transition-colors group">
-                                        <td className="px-2 py-1 border-r"><input className="edit-field font-semibold text-gray-900" value={row.route} onChange={(e) => handleUpdate(row.id, 'route', e.target.value)} /></td>
-                                        <td className="px-2 py-1 border-r"><input className="edit-field" value={row.serial} onChange={(e) => handleUpdate(row.id, 'serial', e.target.value)} /></td>
-                                        <td className="px-2 py-1 border-r"><input className="edit-field" value={row.brigade || ''} onChange={(e) => handleUpdate(row.id, 'brigade', e.target.value)} /></td>
-                                        <td className="px-2 py-1 border-r"><input className="edit-field" value={row.origin || ''} onChange={(e) => handleUpdate(row.id, 'origin', e.target.value)} /></td>
-                                        <td className="px-2 py-1 border-r"><input className="edit-field" value={row.destination || ''} onChange={(e) => handleUpdate(row.id, 'destination', e.target.value)} /></td>
-                                        <td className="px-2 py-1 border-r w-24"><input type="number" className="edit-field text-center font-mono" value={row.vic_count || 0} onChange={(e) => handleUpdate(row.id, 'vic_count', e.target.value)} /></td>
-                                        <td className="px-2 py-1 border-r w-24"><input type="number" className="edit-field text-center font-mono" value={row.readiness || 100} onChange={(e) => handleUpdate(row.id, 'readiness', e.target.value)} /></td>
-                                        <td className="px-2 py-1 border-r"><input type="datetime-local" className="edit-field" value={formatDateForInput(row.start)} onChange={(e) => handleUpdate(row.id, 'start', e.target.value)} /></td>
-                                        <td className="px-2 py-1 border-r"><input type="datetime-local" className="edit-field" value={formatDateForInput(row.end)} onChange={(e) => handleUpdate(row.id, 'end', e.target.value)} /></td>
-                                        <td className="px-2 py-1 border-r"><input className="edit-field" value={row.remarks || ''} onChange={(e) => handleUpdate(row.id, 'remarks', e.target.value)} /></td>
-                                        <td className="px-1 py-1 text-center w-12 sticky right-0 bg-white group-hover:bg-gray-50 border-l border-gray-200">
-                                            <button onClick={() => handleDeleteRow(row.id)} className="text-gray-500 hover:text-red-600 transition p-1.5 rounded-full hover:bg-red-50"><i className="fas fa-trash"></i></button>
+                                    <tr key={row.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="px-2 py-1 border-r">
+                                            <input className="edit-field font-semibold text-gray-900" value={row.route} onChange={(e) => handleUpdate(row.id, 'route', e.target.value)} />
+                                        </td>
+                                        <td className="px-2 py-1 border-r">
+                                            <input className="edit-field" value={row.serial} onChange={(e) => handleUpdate(row.id, 'serial', e.target.value)} />
+                                        </td>
+                                        <td className="px-2 py-1 border-r">
+                                            <input className="edit-field" value={row.brigade || ''} placeholder="Add BDE..." onChange={(e) => handleUpdate(row.id, 'brigade', e.target.value)} />
+                                        </td>
+                                        <td className="px-2 py-1 border-r">
+                                            <input className="edit-field" value={row.origin || ''} placeholder="Origin" onChange={(e) => handleUpdate(row.id, 'origin', e.target.value)} />
+                                        </td>
+                                        <td className="px-2 py-1 border-r">
+                                            <input className="edit-field" value={row.destination || ''} placeholder="Dest" onChange={(e) => handleUpdate(row.id, 'destination', e.target.value)} />
+                                        </td>
+                                        <td className="px-2 py-1 border-r text-center w-24">
+                                            <input type="number" className="edit-field text-center font-mono" value={row.vic_count || 0} onChange={(e) => handleUpdate(row.id, 'vic_count', e.target.value)} />
+                                        </td>
+                                        <td className="px-2 py-1 border-r text-center w-24">
+                                            <input 
+                                                type="number" min="0" max="100" 
+                                                className="edit-field text-center font-mono" 
+                                                value={row.readiness || 100} 
+                                                onChange={(e) => handleUpdate(row.id, 'readiness', e.target.value)} 
+                                            />
+                                        </td>
+                                        <td className="px-2 py-1 border-r">
+                                            <input type="datetime-local" className="edit-field" value={formatDateForInput(row.start)} onChange={(e) => handleUpdate(row.id, 'start', e.target.value)} />
+                                        </td>
+                                        <td className="px-2 py-1 border-r">
+                                            <input type="datetime-local" className="edit-field" value={formatDateForInput(row.end)} onChange={(e) => handleUpdate(row.id, 'end', e.target.value)} />
+                                        </td>
+                                        <td className="px-2 py-1 border-r">
+                                            <input className="edit-field" value={row.remarks || ''} placeholder="Remarks" onChange={(e) => handleUpdate(row.id, 'remarks', e.target.value)} />
                                         </td>
                                     </tr>
                                 ))}
@@ -710,25 +724,129 @@
             );
 
             const GanttView = () => {
-                const ROW_HEIGHT = 40; const HEADER_HEIGHT = 70; const GROUP_PADDING = 45; const LABEL_WIDTH_PCT = 10; 
-                let totalSvgHeight = HEADER_HEIGHT + 50;
-                sortedRoutes.forEach(route => { totalSvgHeight += GROUP_PADDING + (groupedData[route].length * ROW_HEIGHT); });
+                const ROW_HEIGHT = 40; 
+                const HEADER_HEIGHT = 70;
+                const GROUP_PADDING = 45;
+                const LABEL_WIDTH_PCT = 10; 
                 
-                const dayStripes = []; const dayLabels = [];
-                let current = new Date(minTime); current.setHours(0,0,0,0);
+                let totalSvgHeight = HEADER_HEIGHT;
+                sortedRoutes.forEach(route => {
+                    totalSvgHeight += GROUP_PADDING;
+                    totalSvgHeight += (groupedData[route].length * ROW_HEIGHT);
+                });
+                totalSvgHeight += 50; 
+
+                const VIEWBOX_WIDTH = 1600;
+                const VIEWBOX_HEIGHT = totalSvgHeight;
+
+                const dayStripes = [];
+                const dayLabels = [];
+                
+                let current = new Date(minTime);
+                current.setHours(0,0,0,0);
                 if (current.getTime() > minTime) current.setDate(current.getDate() - 1);
-                
-                // Add conditional check for infinite loop prevention
-                let loopGuard = 0;
-                while (current.getTime() < maxTime && loopGuard < 365) {
-                    loopGuard++;
+
+                while (current.getTime() < maxTime) {
+                    const timeRange = totalDuration;
+                    const CHART_WIDTH_PCT = 100 - LABEL_WIDTH_PCT;
+                    
                     const dayStartOffset = current.getTime() - minTime;
-                    const startX = LABEL_WIDTH_PCT + ((dayStartOffset / totalDuration) * (100 - LABEL_WIDTH_PCT));
-                    const nextDay = new Date(current); nextDay.setDate(nextDay.getDate() + 1);
-                    const width = ((nextDay.getTime() - current.getTime()) / totalDuration) * (100 - LABEL_WIDTH_PCT);
-                    dayStripes.push(<rect key={`stripe-${current.getTime()}`} x={`${startX}%`} y="0" width={`${width}%`} height="100%" className={current.getDate() % 2 === 0 ? "stripe-bg-alt" : "stripe-bg"} />);
-                    dayLabels.push(<text key={`lbl-date-${current.getTime()}`} x={`${startX + (width/2)}%`} y="20" textAnchor="middle" className="text-[14px] fill-gray-900 font-bold uppercase tracking-widest" style={{fontSize: '14px'}}>{current.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</text>);
-                    if (startX > LABEL_WIDTH_PCT) dayLabels.push(<line key={`line-0000-${current.getTime()}`} x1={`${startX}%`} y1={HEADER_HEIGHT - 20} x2={`${startX}%`} y2={totalSvgHeight} stroke="#cbd5e1" strokeWidth="1" />);
+                    const startX = LABEL_WIDTH_PCT + ((dayStartOffset / timeRange) * CHART_WIDTH_PCT);
+                    
+                    const nextDay = new Date(current);
+                    nextDay.setDate(nextDay.getDate() + 1);
+                    const dayDur = nextDay.getTime() - current.getTime();
+                    
+                    const width = (dayDur / timeRange) * CHART_WIDTH_PCT;
+
+                    const isEven = current.getDate() % 2 === 0;
+                    const stripeClass = isEven ? "stripe-bg-alt" : "stripe-bg";
+
+                    dayStripes.push(
+                        <rect 
+                            key={`stripe-${current.getTime()}`} 
+                            x={`${startX}%`} 
+                            y="0" 
+                            width={`${width}%`} 
+                            height="100%" 
+                            className={stripeClass}
+                        />
+                    );
+                    
+                    dayLabels.push(
+                         <text 
+                            key={`lbl-date-${current.getTime()}`}
+                            x={`${startX + (width/2)}%`} 
+                            y="20" 
+                            textAnchor="middle" 
+                            className="text-[14px] fill-gray-900 font-bold uppercase tracking-widest"
+                            style={{fontSize: '14px'}}
+                        >
+                            {current.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </text>
+                    );
+                    
+                    if (startX > LABEL_WIDTH_PCT) {
+                         dayLabels.push(
+                            <text 
+                                key={`lbl-0000-${current.getTime()}`}
+                                x={`${startX}%`} 
+                                y="45" 
+                                textAnchor="middle" 
+                                className="text-[10px] fill-gray-400 font-mono"
+                                style={{fontSize: '10px'}}
+                            >
+                                0000
+                            </text>
+                        );
+                         dayLabels.push(
+                            <line 
+                                key={`line-0000-${current.getTime()}`} 
+                                x1={`${startX}%`} 
+                                y1={HEADER_HEIGHT - 20} 
+                                x2={`${startX}%`} 
+                                y2={totalSvgHeight} 
+                                stroke="#cbd5e1" 
+                                strokeWidth="1" 
+                            />
+                        );
+                    }
+
+                    for(let h=6; h<24; h+=6) {
+                        const hourTime = new Date(current);
+                        hourTime.setHours(h);
+                        const tickTimeOffset = hourTime.getTime() - minTime;
+                        const tickX = LABEL_WIDTH_PCT + ((tickTimeOffset / timeRange) * CHART_WIDTH_PCT);
+                        const labelText = h.toString().padStart(2, '0') + "00";
+
+                        if (tickX > LABEL_WIDTH_PCT && tickX < 100) {
+                             dayLabels.push(
+                                <text 
+                                    key={`lbl-${hourTime.getTime()}`}
+                                    x={`${tickX}%`} 
+                                    y="45" 
+                                    textAnchor="middle" 
+                                    className="text-[10px] fill-gray-400 font-mono"
+                                    style={{fontSize: '10px'}}
+                                >
+                                    {labelText}
+                                </text>
+                             );
+
+                             dayLabels.push(
+                                <line 
+                                    key={`tick-${hourTime.getTime()}`} 
+                                    x1={`${tickX}%`} 
+                                    y1={HEADER_HEIGHT - 20} 
+                                    x2={`${tickX}%`} 
+                                    y2={totalSvgHeight} 
+                                    stroke="#e5e7eb" 
+                                    strokeDasharray="4 4" 
+                                    strokeWidth="1" 
+                                />
+                            );
+                        }
+                    }
                     current = nextDay;
                 }
 
@@ -736,39 +854,94 @@
                     <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex flex-col gap-0 h-full">
                         <div className="bg-gray-800 text-white p-3 flex justify-between items-center shadow-md z-10">
                             <div className="flex items-center gap-4">
-                                <span className="text-sm font-bold text-gray-300 uppercase tracking-wider">Zoom</span>
-                                <input type="range" min="0.5" max="3.0" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-48 cursor-pointer h-2 bg-gray-600 rounded-lg appearance-none"/>
+                                <span className="text-sm font-bold text-gray-300 uppercase tracking-wider">Zoom Level</span>
+                                <input 
+                                    type="range" 
+                                    min="0.5" 
+                                    max="3.0" 
+                                    step="0.1" 
+                                    value={zoom} 
+                                    onChange={(e) => setZoom(parseFloat(e.target.value))} 
+                                    className="w-48 cursor-pointer h-2 bg-gray-600 rounded-lg appearance-none"
+                                />
                                 <span className="text-sm font-mono w-12 text-blue-300">{Math.round(zoom * 100)}%</span>
                             </div>
+                            <div className="text-xs text-gray-400 flex items-center gap-2">
+                                <span className="px-2 py-1 bg-gray-700 rounded border border-gray-600">Scroll to Pan</span>
+                                <span className="px-2 py-1 bg-gray-700 rounded border border-gray-600">Pinch/Drag</span>
+                            </div>
                         </div>
+
                         <div className="window-frame-16-9 flex-1 bg-gray-100 relative">
                             <div className="absolute inset-0 overflow-auto">
-                                <div ref={exportRef} style={{ width: `${zoom * 100}%`, minWidth: '0', height: 'max-content', minHeight: '100%' }} className="bg-white origin-top-left">
+                                <div 
+                                    ref={exportRef}
+                                    style={{ 
+                                        width: `${zoom * 100}%`, 
+                                        minWidth: '0', /* UPDATED: Changed from 100% to 0 to allow shrinking */
+                                        height: 'max-content',
+                                        minHeight: '100%'
+                                    }} 
+                                    className="bg-white origin-top-left"
+                                >
                                     <div className="p-4">
-                                        <div className="flex justify-between items-end border-b pb-2 mb-2"><div><h2 className="text-3xl font-bold text-gray-900">Movement Gantt</h2></div></div>
-                                        <svg className="w-full block" viewBox={`0 0 1600 ${totalSvgHeight}`} preserveAspectRatio="none">
+                                        <div className="flex justify-between items-end border-b pb-2 mb-2">
+                                            <div>
+                                                <h2 className="text-3xl font-bold text-gray-900">Movement Gantt</h2>
+                                                <div className="text-sm text-gray-500 mt-1 flex gap-4">
+                                                    <span className="flex items-center gap-1"><span className="w-4 h-4 bg-green-500 rounded"></span> Bravo</span>
+                                                    <span className="flex items-center gap-1"><span className="w-4 h-4 bg-orange-500 rounded"></span> Charlie</span>
+                                                    <span className="flex items-center gap-1"><span className="w-4 h-4 bg-blue-500 rounded"></span> Alpha</span>
+                                                </div>
+                                            </div>
+                                            <div className="text-right text-sm text-gray-500 font-mono">
+                                                Window: {new Date(minTime).toLocaleString()} - {new Date(maxTime).toLocaleString()}
+                                            </div>
+                                        </div>
+
+                                        <svg 
+                                            className="w-full block" 
+                                            viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`} 
+                                            preserveAspectRatio="none"
+                                        >
                                             <rect x="0" y="0" width={`${LABEL_WIDTH_PCT}%`} height="100%" fill="#f8fafc" />
                                             <line x1={`${LABEL_WIDTH_PCT}%`} y1="0" x2={`${LABEL_WIDTH_PCT}%`} y2="100%" stroke="#cbd5e1" strokeWidth="2" />
-                                            <g>{dayStripes}</g><g>{dayLabels}</g>
+
+                                            <g className="grid-layer">{dayStripes}</g>
+                                            <g className="grid-lines">{dayLabels}</g>
+
                                             {sortedRoutes.map((route, groupIndex, arr) => {
-                                                let yOffset = HEADER_HEIGHT; for(let i=0; i<groupIndex; i++) yOffset += (groupedData[arr[i]].length * ROW_HEIGHT) + GROUP_PADDING;
+                                                let yOffset = HEADER_HEIGHT; 
+                                                for(let i=0; i<groupIndex; i++) {
+                                                    yOffset += (groupedData[arr[i]].length * ROW_HEIGHT) + GROUP_PADDING; 
+                                                }
+
                                                 return (
                                                     <g key={route}>
                                                         <line x1="0" y1={yOffset} x2="100%" y2={yOffset} stroke="#94a3b8" strokeWidth="2" />
                                                         <rect x="0" y={yOffset} width="100%" height="28" fill="#e2e8f0" opacity="0.9" />
                                                         <text x="15" y={yOffset + 20} className="font-extrabold fill-gray-800 text-lg tracking-wide">ROUTE: {route.toUpperCase()}</text>
+
                                                         {groupedData[route].map((item, index) => {
+                                                            const CHART_WIDTH_PCT = 100 - LABEL_WIDTH_PCT;
                                                             const startOffset = new Date(item.start).getTime() - minTime;
-                                                            const barX = LABEL_WIDTH_PCT + Math.max(0, (startOffset / totalDuration) * (100 - LABEL_WIDTH_PCT));
-                                                            const barWidth = ((new Date(item.end).getTime() - new Date(item.start).getTime()) / totalDuration) * (100 - LABEL_WIDTH_PCT);
+                                                            const startPctRaw = (startOffset / totalDuration) * CHART_WIDTH_PCT;
+                                                            const durOffset = new Date(item.end).getTime() - new Date(item.start).getTime();
+                                                            const durPctRaw = (durOffset / totalDuration) * CHART_WIDTH_PCT;
+
+                                                            const barX = LABEL_WIDTH_PCT + Math.max(0, startPctRaw);
+                                                            const barWidth = durPctRaw;
                                                             const rowY = yOffset + 35 + (index * ROW_HEIGHT);
-                                                            const c = getRouteColor(item.route);
+                                                            const colors = getRouteColor(item.route);
+                                                            const readiness = item.readiness !== undefined ? parseInt(item.readiness) : 100;
+                                                            const fillWidth = (barWidth * (readiness / 100));
+
                                                             return (
-                                                                <g key={item.id}>
+                                                                <g key={item.id} className="group">
                                                                     <line x1="0" y1={rowY + (ROW_HEIGHT/2)} x2="100%" y2={rowY + (ROW_HEIGHT/2)} stroke="#e2e8f0" strokeWidth="1" />
                                                                     <text x="15" y={rowY + (ROW_HEIGHT/2) + 6} className="text-[16px] fill-gray-900 font-bold font-mono" style={{ fontSize: '16px' }}>{item.serial}</text>
-                                                                    <rect x={`${barX}%`} y={rowY} width={`${barWidth}%`} height={ROW_HEIGHT - 12} rx="4" fill={c.bg} stroke={c.stroke} strokeWidth="1" opacity="0.6" />
-                                                                    <rect x={`${barX}%`} y={rowY} width={`${barWidth * ((item.readiness||100)/100)}%`} height={ROW_HEIGHT - 12} rx="4" fill={c.fill} />
+                                                                    <rect x={`${barX}%`} y={rowY} width={`${barWidth}%`} height={ROW_HEIGHT - 12} rx="4" fill={colors.bg} stroke={colors.stroke} strokeWidth="1" opacity="0.6" />
+                                                                    <rect x={`${barX}%`} y={rowY} width={`${fillWidth}%`} height={ROW_HEIGHT - 12} rx="4" fill={colors.fill} />
                                                                     <text x={`${barX + barWidth + 0.5}%`} dx="10" y={rowY + (ROW_HEIGHT/2) + 5} className="text-[14px] fill-gray-600 font-bold pointer-events-none" style={{ fontSize: '14px' }}>{item.brigade}</text>
                                                                 </g>
                                                             );
@@ -788,57 +961,217 @@
             return (
                 <div className="p-6 h-full flex flex-col">
                     <div className="flex justify-between items-end mb-6 pb-4 border-b border-gray-300 flex-shrink-0">
-                        <div><h1 className="text-2xl font-extrabold text-gray-900 tracking-tight">Movement Tracker</h1></div>
+                        <div>
+                            <h1 className="text-2xl font-extrabold text-gray-900 tracking-tight">Movement Tracker</h1>
+                            <p className="text-gray-500 mt-1 text-sm">Synchronization Matrix & Visualization</p>
+                        </div>
                         <div className="flex gap-2">
-                             <button onClick={() => setActiveTab('gantt')} className={`px-4 py-2 rounded-md font-medium text-sm transition-all ${activeTab === 'gantt' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-600 border'}`}>Gantt View</button>
-                             <button onClick={() => setActiveTab('table')} className={`px-4 py-2 rounded-md font-medium text-sm transition-all ${activeTab === 'table' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white text-gray-600 border'}`}>Data Editor</button>
-                             {activeTab === 'gantt' && (<button onClick={handleExport} className="ml-2 px-4 py-2 bg-gray-900 text-white rounded-md font-medium text-sm hover:bg-gray-700 flex items-center gap-2"><i className="fas fa-camera"></i> Export Image</button>)}
+                             <button 
+                                onClick={() => setActiveTab('gantt')}
+                                className={`px-4 py-2 rounded-md font-medium text-sm transition-all ${activeTab === 'gantt' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                            >
+                                Gantt View
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('table')}
+                                className={`px-4 py-2 rounded-md font-medium text-sm transition-all ${activeTab === 'table' ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                            >
+                                Data Editor
+                            </button>
+                            
+                            {activeTab === 'gantt' && (
+                                <button onClick={handleExport} className="ml-2 px-4 py-2 bg-gray-900 text-white rounded-md font-medium text-sm hover:bg-gray-700 flex items-center gap-2 transition-colors shadow-lg shadow-gray-300">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    Export Image
+                                </button>
+                            )}
                         </div>
                     </div>
-                    <div className="flex-1 overflow-hidden relative flex justify-center items-center"><div className="w-full max-w-full h-full flex flex-col">{activeTab === 'gantt' ? <GanttView /> : <TableView />}</div></div>
+                    <div className="flex-1 overflow-hidden relative flex justify-center items-center">
+                        <div className="w-full max-w-full h-full flex flex-col">
+                            {activeTab === 'gantt' ? <GanttView /> : <TableView />}
+                        </div>
+                    </div>
                 </div>
             );
         };
-        ReactDOM.createRoot(document.getElementById('react-root')).render(<App />);
+
+        const root = ReactDOM.createRoot(document.getElementById('react-root'));
+        root.render(<App />);
     </script>
 
     <!-- 
     ========================================
-    LOGIC SECTION 3: MAP & SIMULATION
+    LOGIC SECTION 3: APP 2 (LEAFLET MAP)
     ======================================== 
     -->
     <script>
-        let popCenters=[{id:601,name:"Nakhon Sawan",latlng:[15.70,100.12],population:250000},{id:602,name:"Bangkok",latlng:[13.75,100.50],population:10800000},{id:610,name:"Saraburi",latlng:[14.53,100.91],population:60809},{id:611,name:"Lop Buri",latlng:[14.80,100.67],population:58000},{id:612,name:"Takhli",latlng:[15.15,100.35],population:42700},{id:613,name:"Si Thep",latlng:[15.42,101.14],population:10465},{id:614,name:"Tha Luang",latlng:[14.73,100.92],population:8842},{id:615,name:"Nong Muang",latlng:[15.11,100.67],population:8710},{id:616,name:"Phra Phutthabat",latlng:[14.71,100.79],population:7817},{id:617,name:"Tak Fa",latlng:[15.29,100.53],population:7292},{id:618,name:"Chai Badan",latlng:[15.17,101.07],population:6334},{id:619,name:"Khok Samrong",latlng:[15.00,100.79],population:3926},{id:620,name:"Ban Mi",latlng:[15.00,100.42],population:3505}];
-        let routes=[{id:101,name:"MSR WYOMING (A)",aliases:["Alpha","A"],color:"#2563eb",weight:5,opacity:0.8,points:[[12.66,100.90],[12.94,101.08],[13.40,101.20],[13.98,101.75],[14.22,101.25],[14.52,100.91]],leafletObj:null},{id:108,name:"MSR NEW MEXICO (B)",aliases:["Bravo","B"],color:"#06b6d4",weight:5,opacity:0.8,points:[[12.66,100.90],[13.10,101.10],[13.50,100.90],[14.05,100.62],[14.50,100.70]],leafletObj:null},{id:102,name:"MSR PENNSYLVANIA (C)",aliases:["Charlie","C"],color:"#2563eb",weight:4,opacity:0.7,points:[[12.66,100.90],[13.36,100.98],[13.69,101.07],[14.05,100.62],[14.52,100.91]],leafletObj:null},{id:103,name:"MSR MICHIGAN",color:"#f97316",weight:4,opacity:0.7,points:[[13.98,101.75],[14.05,101.40],[14.15,100.62]],leafletObj:null},{id:104,name:"MSR OHIO",color:"#f97316",weight:4,opacity:0.7,points:[[15.00,100.60],[14.52,100.91],[14.35,100.57],[14.15,100.62]],leafletObj:null},{id:105,name:"MSR TEXAS",color:"#f97316",weight:4,opacity:0.7,points:[[14.15,100.62],[14.35,100.45],[14.60,100.40],[14.80,100.35]],leafletObj:null},{id:106,name:"Route ECHO (Rail)",color:"#1e293b",weight:3,opacity:0.8,points:[[12.66,100.90],[13.69,101.07],[13.75,100.50],[14.35,100.57],[14.45,100.72]],leafletObj:null},{id:107,name:"Route DELTA (Logs) (D)",aliases:["Delta","D"],color:"#16a34a",weight:4,opacity:0.6,points:[[12.60,100.90],[13.50,100.60],[13.75,100.50],[14.35,100.57],[14.59,100.45],[14.79,100.65]],leafletObj:null},{id:901,name:"Civ Hwy 1 (North)",color:"transparent",weight:0,opacity:0,points:[[15.70,100.12],[15.24,100.33],[14.80,100.40],[14.35,100.56]],leafletObj:null},{id:902,name:"Civ Hwy 1 (South West)",color:"transparent",weight:0,opacity:0,points:[[14.35,100.56],[14.05,100.61],[13.80,100.55],[13.75,100.50]],leafletObj:null},{id:903,name:"Civ Hwy 9 (Ring Road)",color:"transparent",weight:0,opacity:0,points:[[14.35,100.56],[14.05,100.70],[13.70,100.75]],leafletObj:null},{id:904,direction:"forward",name:"Civ Hwy 1 (South Up)",color:"transparent",weight:0,opacity:0,points:[[13.75,100.50],[14.05,100.61],[14.35,100.90],[14.71,100.79]],leafletObj:null},{id:905,name:"Civ Hwy 2 (East In)",color:"transparent",weight:0,opacity:0,points:[[14.97,102.10],[14.66,101.42],[14.62,101.07],[14.71,100.79]],leafletObj:null}];
-        let opsGraphics=[{id:501,name:"PL BLACK",type:"line",color:"#000000",dashArray:"10,5",weight:3,points:[[15.25,99.80],[15.20,100.15],[15.15,100.60]],leafletObj:null},{id:502,name:"PL BLUE",type:"line",color:"#0000FF",dashArray:"10,5",weight:3,points:[[15.05,102.20],[14.95,102.50]],leafletObj:null}];
-        let events=[{id:1,name:"CNY Wave (Main North)",type:"route-flow",routeId:901,direction:"forward",start:new Date(2030,1,4),end:new Date(2030,1,18),intensity:0.9,trailLength:0.25},{id:2,name:"CNY Wave (BKK Core)",type:"route-flow",routeId:902,direction:"forward",start:new Date(2030,1,8),end:new Date(2030,1,20),intensity:0.7,trailLength:0.2},{id:3,name:"CNY Wave (East BKK)",type:"route-flow",routeId:903,direction:"forward",start:new Date(2030,1,8),end:new Date(2030,1,20),intensity:0.6,trailLength:0.2},{id:10,name:"Festival Inflow (South)",type:"route-flow",routeId:904,direction:"forward",start:new Date(2030,1,25),end:new Date(2030,2,10),intensity:0.8,trailLength:0.25},{id:11,name:"Festival Inflow (East)",type:"route-flow",routeId:905,direction:"forward",start:new Date(2030,1,28),end:new Date(2030,2,9),intensity:0.7,trailLength:0.2},{id:12,name:"Festival Inflow (North)",type:"static",lat:14.85,lng:100.62,start:new Date(2030,2,1),end:new Date(2030,2,10),fadeIn:3,fadeOut:1,maxIntensity:0.6},{id:16,name:"Festival Inflow (Rayong/Ports)",type:"route-flow",routeId:101,direction:"forward",start:new Date(2030,1,25),end:new Date(2030,2,10),intensity:0.75,trailLength:0.25},{id:13,name:"Festival Peak Density",type:"static",lat:14.71,lng:100.79,start:new Date(2030,2,8),end:new Date(2030,2,25),fadeIn:5,fadeOut:5,maxIntensity:1.0,spread:0.1},{id:14,name:"Festival Outflow (South)",type:"route-flow",routeId:904,direction:"reverse",start:new Date(2030,2,20),end:new Date(2030,3,10),intensity:0.7,trailLength:0.3},{id:15,name:"Festival Outflow (East)",type:"route-flow",routeId:905,direction:"reverse",start:new Date(2030,2,22),end:new Date(2030,3,5),intensity:0.6,trailLength:0.25}];
-        let milAreas=[{id:301,name:"SPOD1 Sattahip",type:"point",color:"#333333",latlng:[12.666,100.900],leafletObj:null,isVisible:true},{id:302,name:"SPOD2 Tung Prong",type:"point",color:"#333333",latlng:[12.69,100.86],leafletObj:null,isVisible:true},{id:303,name:"SPOD4 Juksamet",type:"point",color:"#333333",latlng:[12.61,100.92],leafletObj:null,isVisible:true},{id:304,name:"APOD1 U-Tapao",type:"point",color:"#333333",latlng:[12.68,101.00],leafletObj:null,isVisible:true},{id:305,name:"APOD2 Don Mueang",type:"point",color:"#333333",latlng:[13.913,100.607],leafletObj:null,isVisible:true},{id:306,name:"Camp Krueger",type:"polygon",color:"#333333",latlngs:[[12.70,101.02],[12.72,101.02],[12.72,101.04],[12.70,101.04]],leafletObj:null,isVisible:true},{id:307,name:"Camp Red",type:"polygon",color:"#333333",latlngs:[[12.66,100.94],[12.68,100.94],[12.68,100.96],[12.66,100.96]],leafletObj:null,isVisible:true},{id:308,name:"Camp White",type:"polygon",color:"#333333",latlngs:[[13.92,100.59],[13.94,100.59],[13.94,100.61],[13.92,100.61]],leafletObj:null,isVisible:true},{id:309,name:"Camp Blue",type:"polygon",color:"#333333",latlngs:[[13.77,100.59],[13.79,100.59],[13.79,100.61],[13.77,100.61]],leafletObj:null,isVisible:true},{id:201,name:"TSA PICTON",type:"point",color:"#1d4ed8",latlng:[12.92,101.05],leafletObj:null,isVisible:true},{id:202,name:"TSA LOYALTY",type:"point",color:"#1d4ed8",latlng:[13.10,101.10],leafletObj:null,isVisible:true},{id:203,name:"TSA LIGHTNING",type:"point",color:"#1d4ed8",latlng:[13.58,101.28],leafletObj:null,isVisible:true},{id:204,name:"TSA LIBERTY",type:"point",color:"#1d4ed8",latlng:[13.23,99.82],leafletObj:null,isVisible:true},{id:207,name:"CSA HONOR",type:"polygon",color:"#ca8a04",latlngs:[[14.44,100.71],[14.46,100.71],[14.46,100.73],[14.44,100.73]],leafletObj:null,isVisible:true},{id:206,name:"CSA COURAGE",type:"polygon",color:"#ca8a04",latlngs:[[14.50,100.65],[14.70,100.65],[14.70,100.85],[14.50,100.85]],leafletObj:null,isVisible:true},{id:208,name:"MCLB BUTLER",type:"polygon",color:"#ca8a04",latlngs:[[14.46,100.11],[14.48,100.11],[14.48,100.13],[14.46,100.13]],leafletObj:null,isVisible:true},{id:310,name:"BUC-EE'S (Kabin)",type:"polygon",color:"#ca8a04",latlngs:[[13.95,101.65],[14.10,101.65],[14.10,101.80],[13.95,101.80]],leafletObj:null,isVisible:true},{id:209,name:"AA RED RAIDERS",type:"polygon",color:"#15803d",latlngs:[[14.85,100.35],[14.95,100.35],[14.95,100.55],[14.85,100.55]],leafletObj:null,isVisible:true},{id:210,name:"AA EAGLES",type:"polygon",color:"#15803d",latlngs:[[14.85,100.70],[14.95,100.70],[14.95,100.90],[14.85,100.90]],leafletObj:null,isVisible:true},{id:211,name:"AA PEGASUS",type:"polygon",color:"#15803d",latlngs:[[14.65,101.35],[14.75,101.35],[14.75,101.50],[14.65,101.50]],leafletObj:null,isVisible:true},{id:212,name:"AA RAVEN",type:"polygon",color:"#15803d",latlngs:[[14.55,100.35],[14.65,100.35],[14.65,100.50],[14.55,100.50]],leafletObj:null,isVisible:true}];
+        // --- CONFIGURATION ---
+        // CHANGED: Use a specific Local Date (Feb 1st, 2030) instead of UTC "2030-02-01" to match item.start local strings
+        let SIM_START_DATE = new Date(2030, 1, 1); // Feb 1st, 2030 (0-indexed month)
+        let SIM_END_DATE = new Date(2030, 3, 30);  // Apr 30th, 2030
+        let TOTAL_DAYS = (SIM_END_DATE - SIM_START_DATE) / (1000 * 60 * 60 * 24);
         
-        let editingEventId = null, tempMarker = null, selectedCoords = null;
-        let editingRouteId = null, routeEditPoints = [], routeEditMarkersGroup, routeEditPolyline = null;
-        let editingMilAreaId = null, milAreaEditGroup, tempMilPoints = [], tempMilShape = null;
-        let interactionMode = 'none';
+        // --- DATA MODELS ---
+        const popCenters = [
+            { id: 601, name: "Nakhon Sawan (City)", latlng: [15.70, 100.12], population: 250000 },
+            { id: 602, name: "Bangkok (Capital)", latlng: [13.75, 100.50], population: 10800000 },
+            { id: 610, name: "Saraburi (City)", latlng: [14.53, 100.91], population: 60809 },
+            { id: 611, name: "Lop Buri (City)", latlng: [14.80, 100.67], population: 58000 },
+            { id: 612, name: "Takhli", latlng: [15.15, 100.35], population: 42700 },
+            { id: 613, name: "Si Thep", latlng: [15.42, 101.14], population: 10465 },
+            { id: 614, name: "Tha Luang", latlng: [14.73, 100.92], population: 8842 },
+            { id: 615, name: "Nong Muang", latlng: [15.11, 100.67], population: 8710 },
+            { id: 616, name: "Phra Phutthabat", latlng: [14.71, 100.79], population: 7817 },
+            { id: 617, name: "Tak Fa", latlng: [15.29, 100.53], population: 7292 },
+            { id: 618, name: "Chai Badan", latlng: [15.17, 101.07], population: 6334 },
+            { id: 619, name: "Khok Samrong", latlng: [15.00, 100.79], population: 3926 },
+            { id: 620, name: "Ban Mi", latlng: [15.00, 100.42], population: 3505 }
+        ];
 
+        let routes = [
+            { id: 101, name: "MSR WYOMING (A)", aliases: ["Alpha", "A"], color: "#2563eb", weight: 5, opacity: 0.8, points: [[12.66, 100.90], [12.94, 101.08], [13.40, 101.20], [13.98, 101.75], [14.22, 101.25], [14.52, 100.91]], leafletObj: null },
+            { id: 108, name: "MSR NEW MEXICO (B)", aliases: ["Bravo", "B"], color: "#06b6d4", weight: 5, opacity: 0.8, points: [[12.66, 100.90], [13.10, 101.10], [13.50, 100.90], [14.05, 100.62], [14.50, 100.70]], leafletObj: null },
+            { id: 102, name: "MSR PENNSYLVANIA (C)", aliases: ["Charlie", "C"], color: "#2563eb", weight: 4, opacity: 0.7, points: [[12.66, 100.90], [13.36, 100.98], [13.69, 101.07], [14.05, 100.62], [14.52, 100.91]], leafletObj: null },
+            { id: 103, name: "MSR MICHIGAN", color: "#f97316", weight: 4, opacity: 0.7, points: [[13.98, 101.75], [14.05, 101.40], [14.15, 100.62]], leafletObj: null },
+            { id: 104, name: "MSR OHIO", color: "#f97316", weight: 4, opacity: 0.7, points: [[15.00, 100.60], [14.52, 100.91], [14.35, 100.57], [14.15, 100.62]], leafletObj: null },
+            { id: 105, name: "MSR TEXAS", color: "#f97316", weight: 4, opacity: 0.7, points: [[14.15, 100.62], [14.35, 100.45], [14.60, 100.40], [14.80, 100.35]], leafletObj: null },
+            { id: 106, name: "Route ECHO (Rail)", color: "#1e293b", weight: 3, opacity: 0.8, points: [[12.66, 100.90], [13.69, 101.07], [13.75, 100.50], [14.35, 100.57], [14.45, 100.72]], leafletObj: null },
+            { id: 107, name: "Route DELTA (Logs) (D)", aliases: ["Delta", "D"], color: "#16a34a", weight: 4, opacity: 0.6, points: [[12.60, 100.90], [13.50, 100.60], [13.75, 100.50], [14.35, 100.57], [14.59, 100.45], [14.79, 100.65]], leafletObj: null },
+            { id: 901, name: "Civ Hwy 1 (North)", color: "transparent", weight: 0, opacity: 0, points: [[15.70, 100.12], [15.24, 100.33], [14.80, 100.40], [14.35, 100.56]], leafletObj: null },
+            { id: 902, name: "Civ Hwy 1 (South West)", color: "transparent", weight: 0, opacity: 0, points: [[14.35, 100.56], [14.05, 100.61], [13.80, 100.55], [13.75, 100.50]], leafletObj: null },
+            { id: 903, name: "Civ Hwy 9 (Ring Road)", color: "transparent", weight: 0, opacity: 0, points: [[14.35, 100.56], [14.05, 100.70], [13.70, 100.75]], leafletObj: null },
+            { id: 904, direction: "forward", name: "Civ Hwy 1 (South Up)", color: "transparent", weight: 0, opacity: 0, points: [[13.75, 100.50], [14.05, 100.61], [14.35, 100.90], [14.71, 100.79]], leafletObj: null },
+            { id: 905, name: "Civ Hwy 2 (East In)", color: "transparent", weight: 0, opacity: 0, points: [[14.97, 102.10], [14.66, 101.42], [14.62, 101.07], [14.71, 100.79]], leafletObj: null }
+        ];
+
+        let opsGraphics = [
+            { id: 501, name: "PL BLACK", type: "line", color: "#000000", dashArray: "10,5", weight: 3, points: [[15.25, 99.80], [15.20, 100.15], [15.15, 100.60]], leafletObj: null },
+            { id: 502, name: "PL BLUE", type: "line", color: "#0000FF", dashArray: "10,5", weight: 3, points: [[15.05, 102.20], [14.95, 102.50]], leafletObj: null }
+        ];
+
+        let events = [
+            { id: 1, name: "CNY Wave (Main North)", type: "route-flow", routeId: 901, direction: "forward", start: new Date(2030, 1, 4), end: new Date(2030, 1, 18), intensity: 0.9, trailLength: 0.25 },
+            { id: 2, name: "CNY Wave (BKK Core)", type: "route-flow", routeId: 902, direction: "forward", start: new Date(2030, 1, 8), end: new Date(2030, 1, 20), intensity: 0.7, trailLength: 0.2 },
+            { id: 3, name: "CNY Wave (East BKK)", type: "route-flow", routeId: 903, direction: "forward", start: new Date(2030, 1, 8), end: new Date(2030, 1, 20), intensity: 0.6, trailLength: 0.2 },
+            { id: 10, name: "Festival Inflow (South)", type: "route-flow", routeId: 904, direction: "forward", start: new Date(2030, 1, 25), end: new Date(2030, 2, 10), intensity: 0.8, trailLength: 0.25 },
+            { id: 11, name: "Festival Inflow (East)", type: "route-flow", routeId: 905, direction: "forward", start: new Date(2030, 1, 28), end: new Date(2030, 2, 9), intensity: 0.7, trailLength: 0.2 },
+            { id: 12, name: "Festival Inflow (North)", type: "static", lat: 14.85, lng: 100.62, start: new Date(2030, 2, 1), end: new Date(2030, 2, 10), fadeIn: 3, fadeOut: 1, maxIntensity: 0.6 },
+            { id: 16, name: "Festival Inflow (Rayong/Ports)", type: "route-flow", routeId: 101, direction: "forward", start: new Date(2030, 1, 25), end: new Date(2030, 2, 10), intensity: 0.75, trailLength: 0.25 },
+            { id: 13, name: "Festival Peak Density", type: "static", lat: 14.71, lng: 100.79, start: new Date(2030, 2, 8), end: new Date(2030, 2, 25), fadeIn: 5, fadeOut: 5, maxIntensity: 1.0, spread: 0.1 },
+            { id: 14, name: "Festival Outflow (South)", type: "route-flow", routeId: 904, direction: "reverse", start: new Date(2030, 2, 20), end: new Date(2030, 3, 10), intensity: 0.7, trailLength: 0.3 },
+            { id: 15, name: "Festival Outflow (East)", type: "route-flow", routeId: 905, direction: "reverse", start: new Date(2030, 2, 22), end: new Date(2030, 3, 5), intensity: 0.6, trailLength: 0.25 }
+        ];
+
+        let milAreas = [
+            { id: 301, name: "SPOD1 Sattahip", type: "point", color: "#333333", latlng: [12.666, 100.900], leafletObj: null, isVisible: true },
+            { id: 302, name: "SPOD2 Tung Prong", type: "point", color: "#333333", latlng: [12.69, 100.86], leafletObj: null, isVisible: true },
+            { id: 303, name: "SPOD4 Juksamet", type: "point", color: "#333333", latlng: [12.61, 100.92], leafletObj: null, isVisible: true },
+            { id: 304, name: "APOD1 U-Tapao", type: "point", color: "#333333", latlng: [12.68, 101.00], leafletObj: null, isVisible: true },
+            { id: 305, name: "APOD2 Don Mueang", type: "point", color: "#333333", latlng: [13.913, 100.607], leafletObj: null, isVisible: true },
+            { id: 306, name: "Camp Krueger", type: "polygon", color: "#333333", latlngs: [[12.70, 101.02], [12.72, 101.02], [12.72, 101.04], [12.70, 101.04]], leafletObj: null, isVisible: true },
+            { id: 307, name: "Camp Red", type: "polygon", color: "#333333", latlngs: [[12.66, 100.94], [12.68, 100.94], [12.68, 100.96], [12.66, 100.96]], leafletObj: null, isVisible: true },
+            { id: 308, name: "Camp White", type: "polygon", color: "#333333", latlngs: [[13.92, 100.59], [13.94, 100.59], [13.94, 100.61], [13.92, 100.61]], leafletObj: null, isVisible: true },
+            { id: 309, name: "Camp Blue", type: "polygon", color: "#333333", latlngs: [[13.77, 100.59], [13.79, 100.59], [13.79, 100.61], [13.77, 100.61]], leafletObj: null, isVisible: true },
+            { id: 201, name: "TSA PICTON", type: "point", color: "#1d4ed8", latlng: [12.92, 101.05], leafletObj: null, isVisible: true }, 
+            { id: 202, name: "TSA LOYALTY", type: "point", color: "#1d4ed8", latlng: [13.10, 101.10], leafletObj: null, isVisible: true }, 
+            { id: 203, name: "TSA LIGHTNING", type: "point", color: "#1d4ed8", latlng: [13.58, 101.28], leafletObj: null, isVisible: true }, 
+            { id: 204, name: "TSA LIBERTY", type: "point", color: "#1d4ed8", latlng: [13.23, 99.82], leafletObj: null, isVisible: true }, 
+            { id: 207, name: "CSA HONOR", type: "polygon", color: "#ca8a04", latlngs: [[14.44, 100.71], [14.46, 100.71], [14.46, 100.73], [14.44, 100.73]], leafletObj: null, isVisible: true }, 
+            { id: 206, name: "CSA COURAGE", type: "polygon", color: "#ca8a04", latlngs: [[14.50, 100.65], [14.70, 100.65], [14.70, 100.85], [14.50, 100.85]], leafletObj: null, isVisible: true },
+            { id: 208, name: "MCLB BUTLER", type: "polygon", color: "#ca8a04", latlngs: [[14.46, 100.11], [14.48, 100.11], [14.48, 100.13], [14.46, 100.13]], leafletObj: null, isVisible: true },
+            { id: 310, name: "BUC-EE'S (Kabin)", type: "polygon", color: "#ca8a04", latlngs: [[13.95, 101.65], [14.10, 101.65], [14.10, 101.80], [13.95, 101.80]], leafletObj: null, isVisible: true }, 
+            { id: 209, name: "AA RED RAIDERS", type: "polygon", color: "#15803d", latlngs: [[14.85, 100.35], [14.95, 100.35], [14.95, 100.55], [14.85, 100.55]], leafletObj: null, isVisible: true }, 
+            { id: 210, name: "AA EAGLES", type: "polygon", color: "#15803d", latlngs: [[14.85, 100.70], [14.95, 100.70], [14.95, 100.90], [14.85, 100.90]], leafletObj: null, isVisible: true }, 
+            { id: 211, name: "AA PEGASUS", type: "polygon", color: "#15803d", latlngs: [[14.65, 101.35], [14.75, 101.35], [14.75, 101.50], [14.65, 101.50]], leafletObj: null, isVisible: true }, 
+            { id: 212, name: "AA RAVEN", type: "polygon", color: "#15803d", latlngs: [[14.55, 100.35], [14.65, 100.35], [14.65, 100.50], [14.55, 100.50]], leafletObj: null, isVisible: true } 
+        ];
+
+        // --- GLOBAL MAP VARS ---
+        let map;
+        let heatLayer;
+        let currentDayIndex = 24.9; // UPDATED: Changed from 24 to 24.9 to match first movement time (21:30)
+        
+        // Groups for Layer Control
+        let routeLayerGroup, milLayerGroup, popLayerGroup, opsLayerGroup, heatLayerGroup;
+        let milMovementsLayerGroup;
+        
+        // Animation Vars
+        let isPlaying = false;
+        let playInterval;
+        let playbackSpeed = 500; // ms per step
+
+        // Edit Vars
+        let interactionMode = 'none'; 
+        let editingEventId = null;
+        let tempMarker = null;
+        let selectedCoords = null;
+        let editingRouteId = null;
+        let routeEditPoints = [];
+        let routeEditMarkersGroup;
+        let routeEditPolyline = null;
+        let tempMilPoints = [];
+        let tempMilShape = null;
+
+        // Edit for Mil Areas
+        let editingMilAreaId = null;
+        let milAreaEditGroup;
+
+        // --- INITIALIZATION ---
         function initMapApp() {
-            map = L.map('map', { zoomControl: false }).setView([13.8, 100.8], 8); window.map = map;
+            // Setup Map
+            map = L.map('map', { zoomControl: false }).setView([13.8, 100.8], 8);
+            window.map = map; // Expose for invalidation
             L.control.zoom({ position: 'bottomleft' }).addTo(map);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; OSM &copy; CARTO', subdomains: 'abcd', maxZoom: 19 }).addTo(map);
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap &copy; CARTO', subdomains: 'abcd', maxZoom: 19
+            }).addTo(map);
+
+            // Initialize Layer Groups
+            routeLayerGroup = L.layerGroup().addTo(map);
+            milLayerGroup = L.layerGroup().addTo(map);
+            popLayerGroup = L.layerGroup().addTo(map);
+            opsLayerGroup = L.layerGroup().addTo(map);
+            heatLayerGroup = L.layerGroup().addTo(map);
+            milMovementsLayerGroup = L.layerGroup().addTo(map); // New layer
             
-            routeLayerGroup = L.layerGroup().addTo(map); milLayerGroup = L.layerGroup().addTo(map); popLayerGroup = L.layerGroup().addTo(map); heatLayerGroup = L.layerGroup().addTo(map); milMovementsLayerGroup = L.layerGroup().addTo(map); opsLayerGroup = L.layerGroup().addTo(map);
-            window.routeLayerGroup=routeLayerGroup; window.milLayerGroup=milLayerGroup;
-            
-            heatLayer = L.heatLayer([], { radius: 25, blur: 15, maxZoom: 10, max: 1.0, gradient: {0.0: 'blue', 0.33: 'lime', 0.66: 'orange', 1: 'red'} });
-            const originalRedraw = heatLayer._redraw; heatLayer._redraw = function() { if (!this._map) return; const size = this._map.getSize(); if (size.x <= 0 || size.y <= 0) return; originalRedraw.call(this); };
+            // Expose globally for loading logic
+            window.routeLayerGroup = routeLayerGroup;
+            window.milLayerGroup = milLayerGroup;
+            window.popLayerGroup = popLayerGroup;
+            window.opsLayerGroup = opsLayerGroup;
+            window.heatLayerGroup = heatLayerGroup;
+            window.milMovementsLayerGroup = milMovementsLayerGroup;
+
+            // Setup Heatmap
+            heatLayer = L.heatLayer([], { 
+                radius: 25, blur: 15, maxZoom: 10, max: 1.0, 
+                gradient: {0.0: 'blue', 0.33: 'lime', 0.66: 'orange', 1: 'red'} 
+            });
+            const originalRedraw = heatLayer._redraw;
+            heatLayer._redraw = function() {
+                if (!this._map) return;
+                const size = this._map.getSize();
+                if (size.x <= 0 || size.y <= 0) return;
+                originalRedraw.call(this);
+            };
             heatLayerGroup.addLayer(heatLayer);
 
-            routeEditMarkersGroup = L.layerGroup().addTo(map); milAreaEditGroup = L.layerGroup().addTo(map);
+            // Edit Groups (Not in switcher, always on if editing)
+            routeEditMarkersGroup = L.layerGroup().addTo(map);
+            milAreaEditGroup = L.layerGroup().addTo(map);
 
+            // Setup Event Listeners on Map
             map.on('click', (e) => {
                 if (interactionMode === 'editRoute') { 
-                    routeEditPoints.push([e.latlng.lat, e.latlng.lng]); routeEditPolyline.setLatLngs(routeEditPoints); 
-                    const idx=routeEditPoints.length-1; const m=L.marker(e.latlng, {draggable:true, icon:L.divIcon({className:'edit-marker',iconSize:[12,12]})}); 
+                    routeEditPoints.push([e.latlng.lat, e.latlng.lng]); 
+                    routeEditPolyline.setLatLngs(routeEditPoints); 
+                    const idx=routeEditPoints.length-1; 
+                    const m=L.marker(e.latlng, {draggable:true, icon:L.divIcon({className:'edit-marker',iconSize:[12,12]})}); 
                     m.on('drag', function(evt){ routeEditPoints[idx] = [evt.latlng.lat, evt.latlng.lng]; routeEditPolyline.setLatLngs(routeEditPoints); }); 
-                    m.on('contextmenu', function(evt){ routeEditPoints.splice(idx,1); routeEditPolyline.setLatLngs(routeEditPoints); redrawEditMarkers(); }); routeEditMarkersGroup.addLayer(m); 
+                    m.on('contextmenu', function(evt){ routeEditPoints.splice(idx,1); routeEditPolyline.setLatLngs(routeEditPoints); redrawEditMarkers(); }); 
+                    routeEditMarkersGroup.addLayer(m); 
                 } 
                 else if (interactionMode === 'drawMilPolygon') { tempMilPoints.push([e.latlng.lat, e.latlng.lng]); tempMilShape.setLatLngs(tempMilPoints); }
                 else if (interactionMode === 'drawMilPoint') { tempMilPoints=[[e.latlng.lat, e.latlng.lng]]; if(tempMilShape) map.removeLayer(tempMilShape); tempMilShape=L.circleMarker(e.latlng, {color:'black'}).addTo(map); finishMilDraw(); }
@@ -846,86 +1179,293 @@
             });
             map.on('dblclick', (e) => { if (interactionMode === 'drawMilPolygon') finishMilDraw(); });
 
-            document.getElementById('sim-start-input').value = SIM_START_DATE.toISOString().split('T')[0];
-            document.getElementById('sim-end-input').value = SIM_END_DATE.toISOString().split('T')[0];
+            // Initialize Inputs
+            const startInput = document.getElementById('sim-start-input');
+            const endInput = document.getElementById('sim-end-input');
+            if(startInput) startInput.value = SIM_START_DATE.toISOString().split('T')[0];
+            if(endInput) endInput.value = SIM_END_DATE.toISOString().split('T')[0];
 
-            initRoutes(); initMilAreas(); initPopCenters(); initOpsGraphics(); renderEventList(); renderRouteList(); renderMilList(); renderPopList();
-            document.getElementById('timeline').value = currentDayIndex; updateSimulation();
-            document.getElementById('timeline').addEventListener('input', (e) => { currentDayIndex = parseFloat(e.target.value); updateSimulation(); });
+            // Render Layers
+            initRoutes();
+            initMilAreas();
+            initOpsGraphics();
+            initPopCenters();
+            renderEventList();
+            renderRouteList();
+            renderMilList();
+            renderPopList();
+            
+            // Set initial timeline value to currentDayIndex (24.9)
+            const timelineInput = document.getElementById('timeline');
+            if (timelineInput) timelineInput.value = currentDayIndex;
+            updateSimulation();
+
+            // Timeline Listener
+            document.getElementById('timeline').addEventListener('input', (e) => { 
+                currentDayIndex = parseFloat(e.target.value); 
+                updateSimulation(); 
+            });
+            
             updateTimelineGradient();
         }
 
-        // HELPERS
-        function togglePanelBody() { document.getElementById('panel-body').classList.toggle('hidden'); document.getElementById('minimize-icon').classList.toggle('fa-minus'); document.getElementById('minimize-icon').classList.toggle('fa-plus'); }
+        // --- UI HELPERS ---
+        function togglePanelBody() {
+            const body = document.getElementById('panel-body');
+            const icon = document.getElementById('minimize-icon');
+            if (body.classList.contains('hidden')) {
+                body.classList.remove('hidden');
+                icon.className = 'fas fa-minus';
+            } else {
+                body.classList.add('hidden');
+                icon.className = 'fas fa-plus';
+            }
+        }
+
         function switchMilSubTab(subTab) {
-            document.getElementById('mil-sub-movements').className = subTab==='movements' ? "flex-1 py-1 text-xs font-bold text-center rounded bg-white text-blue-600 shadow-sm transition" : "flex-1 py-1 text-xs font-bold text-center rounded text-slate-500 hover:bg-white/50 transition";
-            document.getElementById('mil-sub-areas').className = subTab==='areas' ? "flex-1 py-1 text-xs font-bold text-center rounded bg-white text-blue-600 shadow-sm transition" : "flex-1 py-1 text-xs font-bold text-center rounded text-slate-500 hover:bg-white/50 transition";
-            document.getElementById('mil-content-movements').style.display = subTab==='movements' ? 'flex' : 'none';
-            document.getElementById('mil-content-areas').style.display = subTab==='areas' ? 'flex' : 'none';
+            const tabM = document.getElementById('mil-sub-movements');
+            const tabA = document.getElementById('mil-sub-areas');
+            const contentM = document.getElementById('mil-content-movements');
+            const contentA = document.getElementById('mil-content-areas');
+
+            if(subTab === 'movements') {
+                tabM.className = "flex-1 py-1 text-xs font-bold text-center rounded bg-white text-blue-600 shadow-sm transition";
+                tabA.className = "flex-1 py-1 text-xs font-bold text-center rounded text-slate-500 hover:bg-white/50 transition";
+                contentM.classList.remove('hidden');
+                contentM.classList.add('flex');
+                contentA.classList.add('hidden');
+                contentA.classList.remove('flex');
+            } else {
+                tabA.className = "flex-1 py-1 text-xs font-bold text-center rounded bg-white text-blue-600 shadow-sm transition";
+                tabM.className = "flex-1 py-1 text-xs font-bold text-center rounded text-slate-500 hover:bg-white/50 transition";
+                contentA.classList.remove('hidden');
+                contentA.classList.add('flex');
+                contentM.classList.add('hidden');
+                contentM.classList.remove('flex');
+            }
         }
+
+        // --- TOGGLE HELPER ---
         function toggleLayer(layerKey, isChecked) {
-            let layer; if(layerKey==='heat') layer=heatLayerGroup; if(layerKey==='routes') layer=routeLayerGroup; if(layerKey==='mil') layer=milLayerGroup; if(layerKey==='pop') layer=popLayerGroup; if(layerKey==='movements') layer=milMovementsLayerGroup;
-            isChecked ? map.addLayer(layer) : map.removeLayer(layer);
+            let layer;
+            if(layerKey === 'heat') layer = heatLayerGroup;
+            if(layerKey === 'routes') layer = routeLayerGroup;
+            if(layerKey === 'mil') layer = milLayerGroup;
+            if(layerKey === 'pop') layer = popLayerGroup;
+            if(layerKey === 'movements') layer = milMovementsLayerGroup;
+
+            if (isChecked) {
+                if (!map.hasLayer(layer)) map.addLayer(layer);
+            } else {
+                if (map.hasLayer(layer)) map.removeLayer(layer);
+            }
         }
+
+        // --- ANIMATION LOGIC ---
         function togglePlay() {
             const btn = document.getElementById('play-btn');
-            if (isPlaying) { clearInterval(playInterval); isPlaying = false; btn.innerHTML = '<i class="fas fa-play ml-1"></i>'; btn.classList.replace('bg-amber-500', 'bg-blue-600'); } else {
-                isPlaying = true; btn.innerHTML = '<i class="fas fa-pause"></i>'; btn.classList.replace('bg-blue-600', 'bg-amber-500');
-                if(currentDayIndex >= document.getElementById('timeline').max) { currentDayIndex = 0; document.getElementById('timeline').value = 0; }
-                playInterval = setInterval(() => { if (currentDayIndex < document.getElementById('timeline').max) { currentDayIndex += 0.1; document.getElementById('timeline').value = currentDayIndex; updateSimulation(); } else { togglePlay(); } }, playbackSpeed);
+            if (isPlaying) {
+                clearInterval(playInterval);
+                isPlaying = false;
+                btn.innerHTML = '<i class="fas fa-play ml-1"></i>';
+                btn.classList.replace('bg-amber-500', 'bg-blue-600');
+                btn.classList.replace('hover:bg-amber-600', 'hover:bg-blue-700');
+            } else {
+                isPlaying = true;
+                btn.innerHTML = '<i class="fas fa-pause"></i>';
+                btn.classList.replace('bg-blue-600', 'bg-amber-500');
+                btn.classList.replace('hover:bg-blue-700', 'hover:bg-amber-600');
+                
+                if(currentDayIndex >= document.getElementById('timeline').max) {
+                    currentDayIndex = 0;
+                    document.getElementById('timeline').value = 0;
+                }
+
+                playInterval = setInterval(() => {
+                    const max = parseInt(document.getElementById('timeline').max);
+                    if (currentDayIndex < max) {
+                        currentDayIndex += 0.1; 
+                        document.getElementById('timeline').value = currentDayIndex;
+                        updateSimulation();
+                    } else {
+                        togglePlay(); // Stop at end
+                    }
+                }, playbackSpeed);
             }
         }
-        function updateSpeed() { playbackSpeed = parseInt(document.getElementById('speed-control').value); if(isPlaying) { togglePlay(); togglePlay(); } }
+
+        function updateSpeed() {
+            playbackSpeed = parseInt(document.getElementById('speed-control').value);
+            if(isPlaying) {
+                clearInterval(playInterval);
+                playInterval = setInterval(() => {
+                    const max = parseInt(document.getElementById('timeline').max);
+                    if (currentDayIndex < max) {
+                        currentDayIndex += 0.1;
+                        document.getElementById('timeline').value = currentDayIndex;
+                        updateSimulation();
+                    } else {
+                        togglePlay(); 
+                    }
+                }, playbackSpeed);
+            }
+        }
+
+        // --- TIMELINE GRADIENT ---
         function updateTimelineGradient() {
+            // Wait for React to expose data
             if (!window.REACT_ACCESSORS.getData) return;
             const ganttData = window.REACT_ACCESSORS.getData();
+            if (!ganttData || ganttData.length === 0) return;
+
             const slider = document.getElementById('timeline');
-            const stepCount = 50; let stops = [];
-            const startMs = SIM_START_DATE.getTime(), rangeMs = SIM_END_DATE.getTime() - startMs;
+            if (!slider) return;
+
+            const totalDays = parseInt(slider.max) || 60;
+            const stepCount = 50; // How many gradient stops
+            let stops = [];
+
+            const startMs = SIM_START_DATE.getTime();
+            const endMs = SIM_END_DATE.getTime();
+            const rangeMs = endMs - startMs;
+
             for (let i = 0; i <= stepCount; i++) {
-                const pct = i / stepCount; const timeAtPct = startMs + (rangeMs * pct);
-                let activeCount = 0; ganttData.forEach(item => { if (timeAtPct >= new Date(item.start).getTime() && timeAtPct <= new Date(item.end).getTime()) activeCount++; });
-                let color = '#e2e8f0'; 
-                if (activeCount > 0) { const intensity = Math.min(activeCount / 5, 1); color = intensity > 0.6 ? `rgba(239, 68, 68, ${intensity})` : `rgba(59, 130, 246, ${intensity + 0.3})`; }
+                const pct = i / stepCount;
+                const timeAtPct = startMs + (rangeMs * pct);
+                
+                // Count active movements at this time
+                let activeCount = 0;
+                ganttData.forEach(item => {
+                    const s = new Date(item.start).getTime();
+                    const e = new Date(item.end).getTime();
+                    if (timeAtPct >= s && timeAtPct <= e) activeCount++;
+                });
+
+                // Color Logic: Gray (0) -> Blue (Low) -> Red (High)
+                let color = '#e2e8f0'; // Default gray
+                if (activeCount > 0) {
+                    // Normalize active count (max around 10-15 usually)
+                    const intensity = Math.min(activeCount / 5, 1); 
+                    if (intensity > 0.6) color = `rgba(239, 68, 68, ${intensity})`; // Red
+                    else color = `rgba(59, 130, 246, ${intensity + 0.3})`; // Blue
+                }
                 stops.push(`${color} ${pct * 100}%`);
             }
+
             slider.style.background = `linear-gradient(to right, ${stops.join(', ')})`;
         }
+
+
+        // --- GIF EXPORT LOGIC ---
         async function recordGif() {
             if(isPlaying) togglePlay(); 
-            document.getElementById('recording-overlay').classList.remove('hidden');
-            const gif = new GIF({ workers: 2, quality: 10, width: document.getElementById('map').offsetWidth, height: document.getElementById('map').offsetHeight, workerScript: URL.createObjectURL(new Blob([`importScripts('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js');`], { type: 'application/javascript' })) });
+            const overlay = document.getElementById('recording-overlay');
+            const recBar = document.getElementById('rec-bar');
+            const mapEl = document.getElementById('map');
+            
+            overlay.classList.remove('hidden');
+            currentDayIndex = 0;
+            document.getElementById('timeline').value = 0;
+            updateSimulation();
+
+            const workerBlob = new Blob([`importScripts('https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js');`], { type: 'application/javascript' });
+            const workerUrl = URL.createObjectURL(workerBlob);
+
+            const gif = new GIF({
+                workers: 2,
+                quality: 10,
+                width: mapEl.offsetWidth,
+                height: mapEl.offsetHeight,
+                workerScript: workerUrl
+            });
+
             const max = parseInt(document.getElementById('timeline').max);
-            for (let i = 0; i <= max; i += (max>100?2:1)) {
-                currentDayIndex = i; document.getElementById('timeline').value = i; updateSimulation(); await new Promise(r => setTimeout(r, 100));
-                try { const canvas = await html2canvas(document.getElementById('map'), { useCORS: true, logging: false, allowTaint: true, backgroundColor: '#aad3df' }); gif.addFrame(canvas, {delay: 200}); document.getElementById('rec-bar').style.width = `${Math.round((i/max)*100)}%`; } catch (e) {}
+            const step = max > 100 ? 2 : 1; 
+
+            for (let i = 0; i <= max; i += step) {
+                currentDayIndex = i;
+                document.getElementById('timeline').value = i;
+                updateSimulation();
+                await new Promise(r => setTimeout(r, 100));
+
+                try {
+                    const canvas = await html2canvas(mapEl, {
+                        useCORS: true,
+                        logging: false,
+                        allowTaint: true,
+                        backgroundColor: '#aad3df'
+                    });
+                    
+                    gif.addFrame(canvas, {delay: 200});
+                    const pct = Math.round((i / max) * 100);
+                    recBar.style.width = `${pct}%`;
+                } catch (e) { console.error("Frame capture error:", e); }
             }
-            gif.on('finished', function(blob) { const link = document.createElement('a'); link.download = 'scenario.gif'; link.href = URL.createObjectURL(blob); link.click(); document.getElementById('recording-overlay').classList.add('hidden'); });
+
+            gif.on('finished', function(blob) {
+                const link = document.createElement('a');
+                link.download = 'scenario-timeline.gif';
+                link.href = URL.createObjectURL(blob);
+                link.click();
+                
+                overlay.classList.add('hidden');
+                recBar.style.width = '0%';
+                URL.revokeObjectURL(workerUrl);
+            });
+
             gif.render();
         }
 
-        // MAP LOGIC
+        // --- GEOMETRY & HELPERS ---
+        function getDistance(latlng1, latlng2) {
+            const R = 6371e3; const φ1 = latlng1.lat * Math.PI/180; const φ2 = latlng2.lat * Math.PI/180;
+            const Δφ = (latlng2.lat-latlng1.lat) * Math.PI/180; const Δλ = (latlng2.lng-latlng1.lng) * Math.PI/180;
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        function getPolylineLength(points) {
+            let total = 0;
+            for(let i=0; i<points.length-1; i++) total += L.latLng(points[i]).distanceTo(L.latLng(points[i+1]));
+            return total;
+        }
+
         function getPointAtPercent(points, percent) {
-            let total = 0; for(let i=0; i<points.length-1; i++) total += L.latLng(points[i]).distanceTo(L.latLng(points[i+1]));
-            const target = total * percent; let covered = 0;
+            if (percent <= 0) return L.latLng(points[0]);
+            if (percent >= 1) return L.latLng(points[points.length-1]);
+            const totalDist = getPolylineLength(points);
+            const targetDist = totalDist * percent;
+            let distCovered = 0;
             for(let i=0; i<points.length-1; i++) {
-                const p1 = L.latLng(points[i]), p2 = L.latLng(points[i+1]), seg = p1.distanceTo(p2);
-                if (covered + seg >= target) { const r = (target - covered) / seg; return L.latLng(p1.lat + (p2.lat - p1.lat) * r, p1.lng + (p2.lng - p1.lng) * r); }
-                covered += seg;
+                const p1 = L.latLng(points[i]);
+                const p2 = L.latLng(points[i+1]);
+                const segDist = p1.distanceTo(p2);
+                if (distCovered + segDist >= targetDist) {
+                    const remaining = targetDist - distCovered;
+                    const segPercent = remaining / segDist;
+                    return L.latLng(p1.lat + (p2.lat - p1.lat) * segPercent, p1.lng + (p2.lng - p1.lng) * segPercent);
+                }
+                distCovered += segDist;
             }
             return L.latLng(points[points.length-1]);
         }
+
+        // --- MAP RENDERING ---
         function initMilAreas() {
             milLayerGroup.clearLayers();
             milAreas.forEach(a => {
-                if (a.isVisible !== false && a.id !== editingMilAreaId) {
+                if (a.isVisible !== false && a.id !== editingMilAreaId) { // Skip if editing
                     let styleOpts = {radius: 8, color: 'black', weight: 1, fillColor: a.color, fillOpacity: 0.8};
                     if (a.color === '#333333') { styleOpts.radius = 6; styleOpts.weight = 2; styleOpts.color = 'white'; styleOpts.fillColor = '#333'; }
-                    a.leafletObj = a.type === 'point' ? L.circleMarker(a.latlng, styleOpts).bindPopup(a.name) : L.polygon(a.latlngs, {color: a.color, weight: 2, fillOpacity: 0.3}).bindPopup(a.name);
+                    
+                    if (a.type === 'point') a.leafletObj = L.circleMarker(a.latlng, styleOpts).bindPopup(`<b>${a.name}</b>`).bindTooltip(a.name, {permanent: true, direction: 'bottom', className: 'map-label', offset: [0, 5]});
+                    else a.leafletObj = L.polygon(a.latlngs, {color: a.color, weight: 2, fillOpacity: (a.color === '#333333') ? 0.6 : 0.3}).bindPopup(`<b>${a.name}</b>`).bindTooltip(a.name, {permanent: true, direction: 'center', className: 'map-label'});
+                    
                     milLayerGroup.addLayer(a.leafletObj);
                 }
             });
         }
+
         function initOpsGraphics() {
             opsLayerGroup.clearLayers();
             opsGraphics.forEach(g => {
@@ -933,134 +1473,418 @@
                 opsLayerGroup.addLayer(g.leafletObj);
             });
         }
-        function initRoutes() {
-            routeLayerGroup.clearLayers();
-            routes.forEach(r => { if (r.color !== 'transparent') { r.leafletObj = L.polyline(r.points, { color: r.color, weight: r.weight, opacity: 0.6, dashArray: r.name.includes("Rail") ? '10, 10' : null }).bindPopup(r.name); routeLayerGroup.addLayer(r.leafletObj); } });
-        }
+
         function initPopCenters() {
             popLayerGroup.clearLayers();
-            popCenters.forEach(p => { p.leafletObj = L.circleMarker(p.latlng, {radius: 6, color: '#7e22ce', weight: 1, fillColor: '#d8b4fe', fillOpacity: 0.9}).bindPopup(`${p.name}: ${p.population}`); popLayerGroup.addLayer(p.leafletObj); });
+            popCenters.forEach(p => {
+                let displayPop = p.population >= 1000000 ? (p.population/1000000).toFixed(1) + 'M+' : p.population.toLocaleString('en-US');
+                p.leafletObj = L.circleMarker(p.latlng, {radius: 6, color: '#7e22ce', weight: 1, fillColor: '#d8b4fe', fillOpacity: 0.9})
+                    .bindPopup(`<b>${p.name}</b><br>Population: ${p.population.toLocaleString()}`)
+                    .bindTooltip(`${p.name}: ${displayPop}`, {permanent: true, direction: 'top', className: 'map-label map-label-civ', offset: [0, -5]});
+                popLayerGroup.addLayer(p.leafletObj);
+            });
         }
 
-        // LIST RENDERS
-        function renderMilList() { const list = document.getElementById('mil-list'); list.innerHTML = ""; milAreas.forEach(a => { list.innerHTML += `<div class="flex justify-between items-center bg-white p-2 rounded shadow-sm border border-slate-100 hover:bg-green-50 transition"><div class="flex items-center gap-2"><input type="checkbox" ${a.isVisible!==false?'checked':''} onchange="toggleMilAreaVisibility(${a.id}, this.checked)" class="cursor-pointer"><i class="fas ${a.type==='point'?'fa-map-pin':'fa-draw-polygon'} text-slate-400"></i><div class="text-xs font-bold" style="color:${a.color}">${a.name}</div></div><div class="flex gap-2"><button onclick="editMilArea(${a.id})" class="text-blue-400"><i class="fas fa-pencil-alt"></i></button><button onclick="deleteMilArea(${a.id})" class="text-slate-300 hover:text-red-500"><i class="fas fa-trash"></i></button></div></div>`; }); }
-        window.toggleMilAreaVisibility = function(id, checked) { const a = milAreas.find(x => x.id === id); if(a) { a.isVisible = checked; initMilAreas(); } };
-        window.editMilArea = function(id) {
-            const area = milAreas.find(a => a.id === id); if(!area) return;
-            editingMilAreaId = id; interactionMode = 'editMilArea';
-            document.getElementById('mil-edit-controls').classList.remove('hidden'); document.getElementById('add-mil-btn').classList.add('hidden');
-            initMilAreas(); milAreaEditGroup.clearLayers();
-            if (area.type === 'point') { const m = L.marker(area.latlng, {draggable:true, icon:L.divIcon({className:'edit-marker',iconSize:[12,12]})}).addTo(milAreaEditGroup); m.on('drag', e => area.latlng = [e.latlng.lat, e.latlng.lng]); }
-            else { L.polygon(area.latlngs, {color:area.color, dashArray:'5,5', fillOpacity:0.2}).addTo(milAreaEditGroup); area.latlngs.forEach((ll,idx) => { const m = L.marker(ll, {draggable:true, icon:L.divIcon({className:'edit-marker',iconSize:[12,12]})}).addTo(milAreaEditGroup); m.on('drag', e => { area.latlngs[idx]=[e.latlng.lat, e.latlng.lng]; editMilArea(id); }); }); }
+        function initRoutes() {
+            routeLayerGroup.clearLayers();
+            routes.forEach(r => {
+                if (r.color !== 'transparent') {
+                    r.leafletObj = L.polyline(r.points, { color: r.color, weight: r.weight || 3, opacity: 0.6, lineJoin: 'round', dashArray: r.name.includes("Rail") ? '10, 10' : null })
+                        .bindPopup(`<b>${r.name}</b>`)
+                        .bindTooltip(r.name, {permanent: true, direction: 'center', className: 'map-label', offset: [0, 0]});
+                    routeLayerGroup.addLayer(r.leafletObj);
+                }
+            });
+        }
+
+        // --- UI RENDERERS ---
+        function renderMilList() {
+            const list = document.getElementById('mil-list'); list.innerHTML = "";
+            milAreas.forEach(a => {
+                // Checkbox logic
+                const isChecked = a.isVisible !== false ? 'checked' : '';
+                
+                const el = document.createElement('div');
+                el.className = "flex justify-between items-center bg-white p-2 rounded shadow-sm border border-slate-100 hover:bg-green-50 transition";
+                el.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" ${isChecked} onchange="toggleMilAreaVisibility(${a.id}, this.checked)" class="rounded text-green-600 focus:ring-green-500 cursor-pointer">
+                        <i class="fas ${a.type === 'point' ? 'fa-map-pin' : 'fa-draw-polygon'} text-slate-400"></i>
+                        <div class="text-xs font-bold text-slate-700" style="color:${a.color}">${a.name}</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="editMilArea(${a.id})" class="text-blue-400 hover:text-blue-600"><i class="fas fa-pencil-alt"></i></button>
+                        <button onclick="deleteMilArea(${a.id})" class="text-slate-300 hover:text-red-500"><i class="fas fa-trash"></i></button>
+                    </div>
+                `;
+                list.appendChild(el);
+            });
+        }
+        
+        // Toggle individual area visibility
+        window.toggleMilAreaVisibility = function(id, checked) {
+            const area = milAreas.find(a => a.id === id);
+            if (area) {
+                area.isVisible = checked;
+                if (checked) {
+                    initMilAreas(); // Re-render group
+                } else {
+                    initMilAreas(); // Re-render group
+                }
+            }
         };
-        window.saveMilAreaEdit = function() { editingMilAreaId = null; interactionMode = 'none'; milAreaEditGroup.clearLayers(); document.getElementById('mil-edit-controls').classList.add('hidden'); document.getElementById('add-mil-btn').classList.remove('hidden'); initMilAreas(); };
-        window.cancelMilAreaEdit = window.saveMilAreaEdit;
-        function renderRouteList() { const list = document.getElementById('route-list'); list.innerHTML = ""; routes.forEach(r => { if(r.color!=='transparent') list.innerHTML += `<div class="flex justify-between items-center bg-white p-2 rounded shadow-sm border border-slate-100 hover:bg-indigo-50 transition"><div class="flex items-center gap-2"><div class="h-3 w-3 rounded-full" style="background-color: ${r.color}"></div><div class="font-bold text-slate-700 text-xs">${r.name}</div></div><div class="flex gap-2"><button onclick="editRoute(${r.id})" class="text-blue-400"><i class="fas fa-pencil-alt"></i></button><button onclick="deleteRoute(${r.id})" class="text-slate-300 hover:text-red-500"><i class="fas fa-trash"></i></button></div></div>`; }); }
-        function renderEventList() { const list = document.getElementById('event-list'); list.innerHTML = ""; events.forEach(evt => { list.innerHTML += `<div class="flex justify-between items-center bg-white p-2 rounded shadow-sm border border-slate-100 hover:bg-blue-50 transition"><div><div class="font-bold text-slate-700 text-xs">${evt.name}</div><div class="text-[10px] text-slate-500">${evt.start.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</div></div><div class="flex gap-2"><button onclick="deleteEvent(${evt.id})" class="text-red-300 hover:text-red-500"><i class="fas fa-trash"></i></button></div></div>`; }); }
-        function renderPopList() { const list = document.getElementById('pop-list'); list.innerHTML = ""; popCenters.forEach(p => { const el=document.createElement('div'); el.className="flex justify-between items-center bg-white p-2 rounded shadow-sm border border-slate-100 hover:bg-purple-50 transition cursor-pointer"; el.onclick=()=>map.flyTo(p.latlng,10); el.innerHTML=`<div><div class="font-bold text-slate-700 text-xs">${p.name}</div><div class="text-[10px] text-slate-500">Pop: ${p.population.toLocaleString()}</div></div><i class="fas fa-city text-purple-300"></i>`; list.appendChild(el); }); }
+        
+        // --- EDIT MILITARY AREA LOGIC ---
+        window.editMilArea = function(id) {
+            const area = milAreas.find(a => a.id === id);
+            if(!area) return;
+
+            // 1. Enter Mode
+            editingMilAreaId = id;
+            interactionMode = 'editMilArea';
+            document.getElementById('mil-edit-controls').classList.remove('hidden');
+            document.getElementById('add-mil-btn').classList.add('hidden'); // Hide Add btn
+
+            // 2. Hide Static Layer (Re-render without it)
+            initMilAreas(); 
+
+            // 3. Spawn Editable Handles
+            milAreaEditGroup.clearLayers();
+            
+            if (area.type === 'point') {
+                // Draggable Marker
+                const m = L.marker(area.latlng, {
+                    draggable: true, 
+                    icon: L.divIcon({className: 'edit-marker', iconSize: [12,12]})
+                });
+                m.on('drag', (e) => {
+                    area.latlng = [e.latlng.lat, e.latlng.lng]; // Update Model Live? Or wait save? 
+                    // Better to update temporary, but for simplicity direct update is okay if we have Cancel (Cancel needs deep copy logic, skipping for brevity - user can drag back)
+                });
+                milAreaEditGroup.addLayer(m);
+                // Also show circle to see radius visual
+                L.circleMarker(area.latlng, {radius: 6, color: 'black', weight: 1, fillOpacity: 0.2}).addTo(milAreaEditGroup);
+
+            } else if (area.type === 'polygon') {
+                // Draw Polygon Outline
+                const poly = L.polygon(area.latlngs, {color: area.color, weight: 2, dashArray: '5,5', fillOpacity: 0.2}).addTo(milAreaEditGroup);
+                
+                // Spawn Handles
+                area.latlngs.forEach((latlng, idx) => {
+                    const m = L.marker(latlng, {
+                        draggable: true,
+                        icon: L.divIcon({className: 'edit-marker', iconSize: [12,12]})
+                    });
+                    
+                    m.on('drag', (e) => {
+                        // Update Data Model
+                        area.latlngs[idx] = [e.latlng.lat, e.latlng.lng];
+                        // Update Visuals
+                        poly.setLatLngs(area.latlngs);
+                    });
+                    
+                    milAreaEditGroup.addLayer(m);
+                });
+            }
+        };
+
+        window.saveMilAreaEdit = function() {
+            // Commit changes is implied since we modified `milAreas` objects directly in drag events
+            // Just exit mode
+            exitMilEditMode();
+        };
+
+        window.cancelMilAreaEdit = function() {
+            // Ideally revert changes, but simplistic version just exits
+            // To properly cancel, we'd need to store temp state on enter
+            exitMilEditMode();
+        };
+
+        function exitMilEditMode() {
+            editingMilAreaId = null;
+            interactionMode = 'none';
+            milAreaEditGroup.clearLayers();
+            document.getElementById('mil-edit-controls').classList.add('hidden');
+            document.getElementById('add-mil-btn').classList.remove('hidden');
+            initMilAreas(); // Re-show static layer
+        }
+
+
+        function renderRouteList() {
+            const list = document.getElementById('route-list'); list.innerHTML = "";
+            routes.forEach(r => {
+                if (r.color !== 'transparent') {
+                    const el = document.createElement('div');
+                    el.className = "flex justify-between items-center bg-white p-2 rounded shadow-sm border border-slate-100 hover:bg-indigo-50 transition";
+                    el.innerHTML = `<div class="flex items-center gap-2"><div class="h-3 w-3 rounded-full" style="background-color: ${r.color}"></div><div class="font-bold text-slate-700 text-xs">${r.name}</div></div><div class="flex gap-2"><button onclick="editRoute(${r.id})" class="text-blue-400 hover:text-blue-600"><i class="fas fa-pencil-alt"></i></button><button onclick="deleteRoute(${r.id})" class="text-slate-300 hover:text-red-500"><i class="fas fa-trash"></i></button></div>`;
+                    list.appendChild(el);
+                }
+            });
+        }
+        function renderEventList() { 
+            const list = document.getElementById('event-list'); list.innerHTML = ""; 
+            events.forEach(evt => { 
+                const el = document.createElement('div'); el.className = "flex justify-between items-center bg-white p-2 rounded shadow-sm border border-slate-100 hover:bg-blue-50 transition"; 
+                el.innerHTML = `<div><div class="font-bold text-slate-700 text-xs">${evt.name} <span class="text-[9px] text-slate-400">(${evt.type})</span></div><div class="text-[10px] text-slate-500">${evt.start.toLocaleDateString(undefined, {month:'short', day:'numeric'})} - ${evt.end.toLocaleDateString(undefined, {month:'short', day:'numeric'})}</div></div><div class="flex gap-2"><button onclick="openForm(${evt.id})" class="text-blue-400 hover:text-blue-600"><i class="fas fa-pencil-alt"></i></button><button onclick="deleteEvent(${evt.id})" class="text-red-300 hover:text-red-500"><i class="fas fa-trash"></i></button></div>`; 
+                list.appendChild(el); 
+            }); 
+        }
+        
+        function renderPopList() {
+            const list = document.getElementById('pop-list'); list.innerHTML = "";
+            popCenters.forEach(p => {
+                const el = document.createElement('div');
+                el.className = "flex justify-between items-center bg-white p-2 rounded shadow-sm border border-slate-100 hover:bg-purple-50 transition cursor-pointer";
+                el.onclick = () => map.flyTo(p.latlng, 10);
+                el.innerHTML = `
+                    <div>
+                        <div class="font-bold text-slate-700 text-xs">${p.name}</div>
+                        <div class="text-[10px] text-slate-500">Pop: ${p.population.toLocaleString()}</div>
+                    </div>
+                    <i class="fas fa-city text-purple-300"></i>
+                `;
+                list.appendChild(el);
+            });
+        }
+
         function renderMilMovementList() {
-            const list = document.getElementById('mil-movement-list'); if(!list) return; list.innerHTML = "";
+            const list = document.getElementById('mil-movement-list'); 
+            if(!list) return;
+            list.innerHTML = "";
+            
             const ganttData = window.REACT_ACCESSORS.getData();
-            if(!ganttData || ganttData.length === 0) { list.innerHTML = "<div class='text-xs text-slate-400 italic p-2'>No active movements found.</div>"; return; }
+            if(!ganttData || ganttData.length === 0) {
+                list.innerHTML = "<div class='text-xs text-slate-400 italic p-2'>No active movements found.</div>";
+                return;
+            }
+
             ganttData.forEach(item => {
                 const start = new Date(item.start);
                 const end = new Date(item.end);
                 const durationHrs = ((end - start) / 3600000).toFixed(1);
-                const el = document.createElement('div'); el.className = "bg-white p-2 rounded shadow-sm border-l-4 border-blue-500 hover:bg-blue-50 transition mb-1";
-                el.innerHTML = `<div class="flex justify-between"><span class="font-bold text-slate-700 text-xs">${item.serial} (${item.brigade})</span><span class="text-[9px] bg-slate-100 px-1 rounded text-slate-500">${item.route}</span></div><div class="grid grid-cols-2 gap-1 mt-1 text-[10px] text-slate-500"><div><i class="fas fa-clock mr-1"></i>${durationHrs}h</div><div><i class="fas fa-truck mr-1"></i>${item.vic_count || '?'}</div><div class="col-span-2 text-slate-400 text-[9px] truncate">${start.toLocaleString()}</div></div>`;
+
+                const el = document.createElement('div');
+                el.className = "bg-white p-2 rounded shadow-sm border-l-4 border-blue-500 hover:bg-blue-50 transition mb-1";
+                el.innerHTML = `
+                    <div class="flex justify-between">
+                        <span class="font-bold text-slate-700 text-xs">${item.serial} (${item.brigade})</span>
+                        <span class="text-[9px] bg-slate-100 px-1 rounded text-slate-500">${item.route}</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1 mt-1 text-[10px] text-slate-500">
+                        <div><i class="fas fa-clock mr-1"></i>${durationHrs}h</div>
+                        <div><i class="fas fa-truck mr-1"></i>${item.vic_count || '?'}</div>
+                        <div class="col-span-2 text-slate-400 text-[9px] truncate">${start.toLocaleString()}</div>
+                    </div>
+                `;
                 list.appendChild(el);
             });
         }
-        function switchTab(tab) { ['civil','routes','military','population'].forEach(t=>{document.getElementById('content-'+t).style.display=(tab===t)?'flex':'none'; document.getElementById('tab-'+t).classList.toggle('tab-active', tab===t); document.getElementById('tab-'+t).classList.toggle('tab-inactive', tab!==t);}); if(tab==='military') renderMilMovementList(); }
 
-        // DRAW/EDIT LOGIC (Simplified for brevity but functional)
-        function toggleMilAreaForm() { document.getElementById('mil-area-form').classList.toggle('hidden'); if(!document.getElementById('mil-area-form').classList.contains('hidden')) { document.getElementById('mil-step-1').classList.remove('hidden'); document.getElementById('mil-step-draw').classList.add('hidden'); document.getElementById('mil-step-details').classList.add('hidden'); document.getElementById('add-mil-btn').classList.add('hidden'); } else cancelMilDraw(); }
-        function startMilDraw(type) { document.getElementById('mil-step-1').classList.add('hidden'); document.getElementById('mil-step-draw').classList.remove('hidden'); tempMilPoints=[]; if(tempMilShape) map.removeLayer(tempMilShape); interactionMode=type==='point'?'drawMilPoint':'drawMilPolygon'; map.getContainer().style.cursor="crosshair"; if(type==='polygon') tempMilShape=L.polygon([],{color:'black',dashArray:'5,5'}).addTo(map); }
+        // --- INTERACTION LOGIC ---
+        function switchTab(tab) {
+            ['civil', 'routes', 'military', 'population'].forEach(t => {
+                const btn = document.getElementById('tab-'+t);
+                const content = document.getElementById('content-'+t);
+                if(btn && content) {
+                    btn.className = (tab === t) ? 'flex-none w-1/4 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wide text-center tab-active hover:bg-slate-50 whitespace-nowrap' : 'flex-none w-1/4 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wide text-center tab-inactive hover:bg-slate-50 whitespace-nowrap';
+                    content.style.display = (tab === t) ? 'flex' : 'none';
+                }
+            });
+            if(tab === 'military') renderMilMovementList();
+            
+            if(typeof cancelEvent === 'function') cancelEvent();
+            if(typeof cancelRouteDraw === 'function') cancelRouteDraw();
+            if(typeof cancelMilDraw === 'function') cancelMilDraw();
+        }
+
+        // ... Military Area Logic ...
+        function toggleMilAreaForm() { document.getElementById('mil-area-form').classList.toggle('hidden'); if(document.getElementById('mil-area-form').classList.contains('hidden')) cancelMilDraw(); else { document.getElementById('mil-step-1').classList.remove('hidden'); document.getElementById('mil-step-draw').classList.add('hidden'); document.getElementById('mil-step-details').classList.add('hidden'); document.getElementById('add-mil-btn').classList.add('hidden'); } }
+        function startMilDraw(type) { document.getElementById('mil-step-1').classList.add('hidden'); document.getElementById('mil-step-draw').classList.remove('hidden'); tempMilPoints = []; if(tempMilShape) map.removeLayer(tempMilShape); if(type==='point') { interactionMode='drawMilPoint'; map.getContainer().style.cursor="crosshair"; } else { interactionMode='drawMilPolygon'; map.getContainer().style.cursor="crosshair"; tempMilShape = L.polygon([], {color:'black', dashArray:'5,5'}).addTo(map); } }
         function finishMilDraw() { document.getElementById('mil-step-draw').classList.add('hidden'); document.getElementById('mil-step-details').classList.remove('hidden'); document.getElementById('mil-name').focus(); interactionMode='fillingMilDetails'; map.getContainer().style.cursor=""; }
         function cancelMilDraw() { interactionMode='none'; document.getElementById('mil-area-form').classList.add('hidden'); document.getElementById('add-mil-btn').classList.remove('hidden'); if(tempMilShape) map.removeLayer(tempMilShape); tempMilPoints=[]; map.getContainer().style.cursor=""; }
-        function saveMilArea() { const name=document.getElementById('mil-name').value||"Unnamed"; const color=document.getElementById('mil-type').value; let newArea={id:Date.now(),name:name,color:color,leafletObj:null,isVisible:true}; if(tempMilPoints.length>1) { newArea.type='polygon'; newArea.latlngs=[...tempMilPoints]; } else { newArea.type='point'; newArea.latlng=tempMilPoints[0]; } milAreas.push(newArea); initMilAreas(); renderMilList(); cancelMilDraw(); }
+        function saveMilArea() { const name=document.getElementById('mil-name').value||"Unnamed"; const color=document.getElementById('mil-type').value; let newArea={id:Date.now(),name:name,color:color,leafletObj:null, isVisible: true}; if(tempMilPoints.length>1) { newArea.type='polygon'; newArea.latlngs=[...tempMilPoints]; } else { newArea.type='point'; newArea.latlng=tempMilPoints[0]; } milAreas.push(newArea); initMilAreas(); renderMilList(); cancelMilDraw(); }
         function deleteMilArea(id) { const a=milAreas.find(x=>x.id===id); if(a&&a.leafletObj) milLayerGroup.removeLayer(a.leafletObj); milAreas=milAreas.filter(x=>x.id!==id); renderMilList(); }
-        
-        function startDrawingRoute() { editingRouteId=null; document.getElementById('add-route-btn').classList.add('hidden'); document.getElementById('route-form').classList.remove('hidden'); document.getElementById('route-details').classList.remove('hidden'); document.getElementById('route-form-title').innerText="New Route"; document.getElementById('route-save-btn').innerText="Create"; routeEditPoints=[]; setupRouteEditor(); interactionMode='editRoute'; map.getContainer().style.cursor="crosshair"; }
-        function editRoute(id) { editingRouteId=id; const r=routes.find(x=>x.id===id); document.getElementById('route-name').value=r.name; document.getElementById('route-color').value=r.color; document.getElementById('add-route-btn').classList.add('hidden'); document.getElementById('route-form').classList.remove('hidden'); document.getElementById('route-details').classList.remove('hidden'); document.getElementById('route-form-title').innerText="Edit Route"; document.getElementById('route-save-btn').innerText="Update"; routeEditPoints=[...r.points]; setupRouteEditor(r.color,r.weight); interactionMode='editRoute'; if(r.leafletObj) routeLayerGroup.removeLayer(r.leafletObj); }
+
+        // ... Route Logic ...
+        function startDrawingRoute() { editingRouteId=null; openRouteFormState("New Route","Create"); routeEditPoints=[]; setupRouteEditor(); }
+        function editRoute(id) { editingRouteId=id; const r=routes.find(x=>x.id===id); document.getElementById('route-name').value=r.name; document.getElementById('route-color').value=r.color; document.getElementById('route-opacity').value=r.opacity||0.7; document.getElementById('route-weight').value=r.weight||4; openRouteFormState("Edit Route","Update"); routeEditPoints=[...r.points]; setupRouteEditor(r.color,r.weight); if(r.leafletObj) routeLayerGroup.removeLayer(r.leafletObj); }
+        function openRouteFormState(t,b) { interactionMode='editRoute'; document.getElementById('add-route-btn').classList.add('hidden'); document.getElementById('route-form').classList.remove('hidden'); document.getElementById('route-details').classList.remove('hidden'); document.getElementById('route-form-title').innerText=t; document.getElementById('route-save-btn').innerText=b; map.getContainer().style.cursor="crosshair"; }
         function setupRouteEditor(c='#333',w=3) { routeEditMarkersGroup.clearLayers(); if(routeEditPolyline) map.removeLayer(routeEditPolyline); routeEditPolyline = L.polyline(routeEditPoints, {color:c, weight:w, dashArray:'5,10'}).addTo(map); redrawEditMarkers(); }
         function redrawEditMarkers() { routeEditMarkersGroup.clearLayers(); routeEditPoints.forEach((pt,i) => { const m = L.marker(pt, {draggable:true, icon:L.divIcon({className:'edit-marker',iconSize:[12,12]})}); m.on('drag', function(e) { routeEditPoints[i]=[e.latlng.lat,e.latlng.lng]; routeEditPolyline.setLatLngs(routeEditPoints); }); m.on('contextmenu', function(e) { routeEditPoints.splice(i,1); routeEditPolyline.setLatLngs(routeEditPoints); redrawEditMarkers(); }); routeEditMarkersGroup.addLayer(m); } ); }
         function cancelRouteDraw() { interactionMode='none'; document.getElementById('add-route-btn').classList.remove('hidden'); document.getElementById('route-form').classList.add('hidden'); routeEditMarkersGroup.clearLayers(); if(routeEditPolyline) map.removeLayer(routeEditPolyline); routeEditPoints=[]; if(editingRouteId) { const r=routes.find(x=>x.id===editingRouteId); if(r&&r.leafletObj) routeLayerGroup.addLayer(r.leafletObj); } editingRouteId=null; map.getContainer().style.cursor=""; document.getElementById('route-name').value=''; }
-        function saveRoute() { if(routeEditPoints.length<2) { alert("2+ points required"); return; } const n=document.getElementById('route-name').value||"Unnamed"; const c=document.getElementById('route-color').value; const w=parseInt(document.getElementById('route-weight').value); const rd={name:n,color:c,weight:w,points:[...routeEditPoints],leafletObj:null}; if(editingRouteId) { const idx=routes.findIndex(x=>x.id===editingRouteId); if(idx!==-1) { if(routes[idx].leafletObj) routeLayerGroup.removeLayer(routes[idx].leafletObj); routes[idx]={...routes[idx],...rd}; } } else { routes.push({id:Date.now(),...rd}); } routeEditMarkersGroup.clearLayers(); if(routeEditPolyline) map.removeLayer(routeEditPolyline); editingRouteId=null; initRoutes(); renderRouteList(); cancelRouteDraw(); updateSimulation(); }
+        function saveRoute() { if(routeEditPoints.length<2) { alert("2+ points required"); return; } const n=document.getElementById('route-name').value||"Unnamed"; const c=document.getElementById('route-color').value; const o=parseFloat(document.getElementById('route-opacity').value); const w=parseInt(document.getElementById('route-weight').value); const rd={name:n,color:c,opacity:o,weight:w,points:[...routeEditPoints],leafletObj:null}; if(editingRouteId) { const idx=routes.findIndex(x=>x.id===editingRouteId); if(idx!==-1) { if(routes[idx].leafletObj) routeLayerGroup.removeLayer(routes[idx].leafletObj); routes[idx]={...routes[idx],...rd}; } } else { routes.push({id:Date.now(),...rd}); } routeEditMarkersGroup.clearLayers(); if(routeEditPolyline) map.removeLayer(routeEditPolyline); editingRouteId=null; initRoutes(); renderRouteList(); cancelRouteDraw(); updateSimulation(); }
         function deleteRoute(id) { const r=routes.find(x=>x.id===id); if(r&&r.leafletObj) routeLayerGroup.removeLayer(r.leafletObj); routes=routes.filter(x=>x.id!==id); renderRouteList(); }
-        function selectColor(el,c) { document.getElementById('route-color').value=c; if(routeEditPolyline) routeEditPolyline.setStyle({color:c}); }
+        function selectColor(el,c) { document.getElementById('route-color').value=c; el.parentNode.querySelectorAll('div').forEach(d=>d.style.borderColor='white'); el.style.borderColor='#333'; if(routeEditPolyline) routeEditPolyline.setStyle({color:c}); }
+        document.getElementById('route-weight').addEventListener('input', (e) => { if(routeEditPolyline) routeEditPolyline.setStyle({weight: e.target.value}); });
 
+        // ... Event Logic ...
         function toggleEditMode() { interactionMode = 'editEvent'; document.getElementById('event-form').classList.remove('hidden'); document.getElementById('add-btn').innerText='Click Map...'; map.getContainer().style.cursor = "crosshair"; }
-        function saveEvent() { if (!selectedCoords) { alert("Click map first."); return; } const name = document.getElementById('new-evt-name').value || "Event"; const startVal = document.getElementById('new-evt-start').value; const duration = parseInt(document.getElementById('new-evt-duration').value); const startDate = new Date(startVal); const endDate = new Date(startDate); endDate.setDate(startDate.getDate() + duration); events.push({ id: Date.now(), name: name, lat: selectedCoords.lat, lng: selectedCoords.lng, start: startDate, end: endDate, maxIntensity: 0.9, type: 'static' }); renderEventList(); cancelEvent(); updateSimulation(); }
-        function cancelEvent() { interactionMode = 'none'; document.getElementById('event-form').classList.add('hidden'); document.getElementById('add-btn').innerHTML = '<i class="fas fa-plus mr-1"></i> Add'; map.getContainer().style.cursor = ""; if (tempMarker) map.removeLayer(tempMarker); }
+        function saveEvent() { if (!selectedCoords) { alert("Please click map to set location."); return; } const name = document.getElementById('new-evt-name').value || "Unnamed Event"; const startVal = document.getElementById('new-evt-start').value; const duration = parseInt(document.getElementById('new-evt-duration').value); const fade = parseInt(document.getElementById('new-evt-fade').value); const startDate = new Date(startVal); const endDate = new Date(startDate); endDate.setDate(startDate.getDate() + duration); const eventData = { name: name, lat: selectedCoords.lat, lng: selectedCoords.lng, start: startDate, end: endDate, fadeIn: fade, fadeOut: fade, maxIntensity: 0.9, type: 'static' }; if (editingEventId) { const index = events.findIndex(e => e.id === editingEventId); if (index !== -1) events[index] = { ...events[index], ...eventData }; } else { events.push({ id: Date.now(), ...eventData }); } renderEventList(); cancelEvent(); updateSimulation(); }
+        function cancelEvent() { interactionMode = 'none'; document.getElementById('event-form').classList.add('hidden'); document.getElementById('add-btn').innerHTML = '<i class="fas fa-plus mr-1"></i> Add'; map.getContainer().style.cursor = ""; editingEventId = null; selectedCoords = null; if (tempMarker) map.removeLayer(tempMarker); }
         function deleteEvent(id) { events = events.filter(e => e.id !== id); renderEventList(); updateSimulation(); }
+        function openForm(id) { /* Implemented in full logic */ }
 
-        // SIMULATION UPDATE
-        function updateTimelineRange() { const s=document.getElementById('sim-start-input').value; const e=document.getElementById('sim-end-input').value; if(s&&e) { SIM_START_DATE=new Date(s); SIM_END_DATE=new Date(e); TOTAL_DAYS=(SIM_END_DATE - SIM_START_DATE) / (1000 * 60 * 60 * 24); document.getElementById('timeline').max=TOTAL_DAYS; updateSimulation(); } }
-        function resetTimeline() { updateSimulation(); }
+        // ... Simulation Loop ...
+        function updateTimelineRange() { const s=document.getElementById('sim-start-input').value; const e=document.getElementById('sim-end-input').value; if(s&&e) { SIM_START_DATE=new Date(s); SIM_END_DATE=new Date(e); TOTAL_DAYS=(SIM_END_DATE - SIM_START_DATE) / (1000 * 60 * 60 * 24); document.getElementById('timeline').max=TOTAL_DAYS; resetTimeline(); } }
+        function resetTimeline() { 
+            // Only reset to 0 if not initializing to 24
+            // currentDayIndex = 0; 
+            updateSimulation(); 
+        }
+        
         function updateSimulation() {
-            const currentMs = SIM_START_DATE.getTime() + (currentDayIndex * 86400000); const currentDate = new Date(currentMs);
-            if (document.getElementById('current-date-display')) document.getElementById('current-date-display').innerText = `${currentDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} ${currentDate.toLocaleTimeString('en-US', {hour: '2-digit'})}`;
-            
-            // Heatmap
-            if (!map.hasLayer(heatLayerGroup)) return;
-            let heatPoints = []; let activeCount = 0;
-            popCenters.forEach(p => { if (p.population > 60809) return; const i = p.population / 60809; heatPoints.push([p.latlng[0], p.latlng[1], i]); for(let x=0;x<5;x++) heatPoints.push([p.latlng[0]+(Math.random()-0.5)*0.02, p.latlng[1]+(Math.random()-0.5)*0.02, i*0.3]); });
-            events.forEach(evt => { 
-                if (currentMs >= evt.start.getTime() && currentMs <= evt.end.getTime()) {
-                    activeCount++;
-                    if(evt.type==='route-flow') {
-                        const r=routes.find(x=>x.id===evt.routeId);
-                        if(r) {
-                            const prog = (currentMs-evt.start.getTime())/(evt.end.getTime()-evt.start.getTime());
-                            const head = evt.direction==='reverse'?(1-prog):prog;
-                            for(let i=0;i<20;i++) { 
-                                const pp = evt.direction==='reverse'?head+(i/20*0.2):head-(i/20*0.2); 
-                                if(pp>=0&&pp<=1) {
-                                    const pt = getPointAtPercent(r.points,pp); 
-                                    heatPoints.push([pt.lat, pt.lng, evt.intensity*(1-i/20)]); 
-                                }
-                            }
-                        }
-                    } else heatPoints.push([evt.lat, evt.lng, evt.maxIntensity||1]);
-                }
-            });
-            heatLayer.setLatLngs(heatPoints); document.getElementById('active-event-count').innerText = activeCount;
-            
-            // Military Movements
+            const currentDate = new Date(SIM_START_DATE);
+            let currentMs = SIM_START_DATE.getTime() + (currentDayIndex * 86400000); 
+            if (currentDayIndex === 24) currentMs += (19.5 * 3600000); 
+            const currentDateWithTime = new Date(currentMs);
+
+            const dateDisplay = document.getElementById('current-date-display');
+            if (dateDisplay) {
+                dateDisplay.innerText = `${currentDateWithTime.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} ${currentDateWithTime.toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'})}`;
+            }
+            updateHeatmap(currentDateWithTime);
+            updateMilitaryMovements(currentDateWithTime); // NEW: Update the Gantt movements
+            checkFriction();
+        }
+
+        // --- NEW FUNCTION: RENDER TROOP MOVEMENTS ---
+        function updateMilitaryMovements(currentDate) {
+            // 1. Clear old movements
             milMovementsLayerGroup.clearLayers();
+            
+            // 2. Fetch latest data from React
             const ganttData = window.REACT_ACCESSORS.getData();
+            if(!ganttData || ganttData.length === 0) return;
+
+            const now = currentDate.getTime();
             let activeTroops = 0;
-            if(ganttData) {
-                ganttData.forEach(item => {
-                    const s = new Date(item.start).getTime(), e = new Date(item.end).getTime();
-                    if (currentMs >= s && currentMs <= e) {
-                        activeTroops++;
-                        const routeName = (item.route||"").trim();
-                        const route = routes.find(r => (r.aliases && r.aliases.some(alias => routeName.toLowerCase().includes(alias.toLowerCase()))) || r.name.toLowerCase().includes(routeName.toLowerCase()));
-                        if (route && route.points) {
-                            const pct = (currentMs - s) / (e - s);
-                            if(pct >= 0 && pct <= 1) {
-                                const pos = getPointAtPercent(route.points, pct);
-                                const tankSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="width:24px;height:24px;fill:#1e40af;stroke:white;stroke-width:15px;"><path d="M48 160L48 416c0 17.7 14.3 32 32 32l32 0 0-64 288 0 0 64 32 0c17.7 0 32-14.3 32-32l0-256c0-17.7-14.3-32-32-32l-69.8 0c-2.3-9.4-6.3-18.4-11.8-26.6l21.6-32.4c4.5-6.8 2.7-16-4.1-20.5s-16-2.7-20.5 4.1L327 80l-79 0c-4.4 0-8 3.6-8 8s3.6 8 8 8l48 0 0 32L160 128l0-32 48 0c4.4 0 8-3.6 8-8s-3.6-8-8-8L129 80 107.4 47.6c-4.5-6.8-13.7-8.6-20.5-4.1s-8.6 13.7-4.1 20.5l21.6 32.4c-5.5 8.2-9.5 17.2-11.8 26.6L80 128c-17.7 0-32 14.3-32 32zm0 64l48 0 0-32-48 0 0 32zm0 64l48 0 0-32-48 0 0 32zm416-192l0 32-48 0 0-32 48 0zm0 64l0 32-48 0 0-32 48 0zm0 64l0 32-48 0 0-32 48 0zM192 192l128 0 0 64-128 0 0-64z"/></svg>`;
-                                const icon = L.divIcon({ className: 'mil-icon-marker', html: tankSvg, iconSize: [32, 32], iconAnchor: [16, 16] });
-                                L.marker(pos, { icon: icon }).bindPopup(`<b>${item.serial}</b><br>${item.brigade}`).bindTooltip(`${item.brigade}`, { permanent: true, direction: 'bottom', className: 'bg-white/80 px-1 rounded text-[9px] font-bold border border-blue-800 text-blue-900', offset: [0, 10] }).addTo(milMovementsLayerGroup);
-                            }
+
+            ganttData.forEach(item => {
+                const start = new Date(item.start).getTime();
+                const end = new Date(item.end).getTime();
+
+                // Only render if within the time window
+                if (now >= start && now <= end) {
+                    activeTroops++;
+                    
+                    // 3. Find Matching Route Geometry
+                    // Logic: Search by alias (e.g., "Alpha") or first letter of route name
+                    const routeName = (item.route || "").trim();
+                    const route = routes.find(r => {
+                        if(r.aliases && r.aliases.some(alias => routeName.toLowerCase().includes(alias.toLowerCase()))) return true;
+                        if(r.name.toLowerCase().includes(routeName.toLowerCase())) return true;
+                        return false;
+                    });
+
+                    if (route && route.points) {
+                        // 4. Calculate Position
+                        const totalDuration = end - start;
+                        const elapsed = now - start;
+                        const pct = elapsed / totalDuration;
+                        
+                        if(pct >= 0 && pct <= 1) {
+                            const position = getPointAtPercent(route.points, pct);
+                            
+                            // 5. Render Icon - Use Tank SVG directly
+                            const tankSvg = `
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" style="width: 24px; height: 24px; fill: #1e40af; stroke: white; stroke-width: 15px;">
+                                    <path d="M48 160L48 416c0 17.7 14.3 32 32 32l32 0 0-64 288 0 0 64 32 0c17.7 0 32-14.3 32-32l0-256c0-17.7-14.3-32-32-32l-69.8 0c-2.3-9.4-6.3-18.4-11.8-26.6l21.6-32.4c4.5-6.8 2.7-16-4.1-20.5s-16-2.7-20.5 4.1L327 80l-79 0c-4.4 0-8 3.6-8 8s3.6 8 8 8l48 0 0 32L160 128l0-32 48 0c4.4 0 8-3.6 8-8s-3.6-8-8-8L129 80 107.4 47.6c-4.5-6.8-13.7-8.6-20.5-4.1s-8.6 13.7-4.1 20.5l21.6 32.4c-5.5 8.2-9.5 17.2-11.8 26.6L80 128c-17.7 0-32 14.3-32 32zm0 64l48 0 0-32-48 0 0 32zm0 64l48 0 0-32-48 0 0 32zm0 64l48 0 0-32-48 0 0 32zm416-192l0 32-48 0 0-32 48 0zm0 64l0 32-48 0 0-32 48 0zm0 64l0 32-48 0 0-32 48 0zM192 192l128 0 0 64-128 0 0-64z"/>
+                                </svg>
+                            `;
+                            
+                            const icon = L.divIcon({
+                                className: 'mil-icon-marker',
+                                html: tankSvg,
+                                iconSize: [32, 32],
+                                iconAnchor: [16, 16]
+                            });
+
+                            L.marker(position, { icon: icon })
+                                .bindPopup(`
+                                    <div class="font-bold text-xs uppercase mb-1">Active Convoy</div>
+                                    <div class="text-xs">
+                                        <b>Serial:</b> ${item.serial}<br>
+                                        <b>Unit:</b> ${item.brigade}<br>
+                                        <b>Route:</b> ${item.route}<br>
+                                        <b>Origin:</b> ${item.origin || 'N/A'}<br>
+                                        <b>Dest:</b> ${item.destination || 'N/A'}<br>
+                                        <b>VICs:</b> ${item.vic_count || '0'}<br>
+                                        <b>Progress:</b> ${Math.round(pct * 100)}%
+                                    </div>
+                                `)
+                                .bindTooltip(`${item.brigade}`, { permanent: true, direction: 'bottom', className: 'bg-white/80 px-1 rounded text-[9px] font-bold border border-blue-800 text-blue-900', offset: [0, 10] })
+                                .addTo(milMovementsLayerGroup);
                         }
                     }
-                });
-            }
-            document.getElementById('active-troop-count').innerText = activeTroops;
+                }
+            });
             
-            // Friction
-            if(heatPoints.length>0) {
-                 const maxI = heatLayer._latlngs.reduce((m, p) => Math.max(m, p[2]), 0);
-                 const fl = document.getElementById('friction-level');
-                 fl.innerText = maxI > 0.8 ? "HIGH" : maxI > 0.5 ? "MED" : "LOW";
-                 fl.className = maxI > 0.8 ? "text-red-600 font-bold animate-pulse" : maxI > 0.5 ? "text-orange-500 font-bold" : "text-slate-800 font-bold";
+            const countEl = document.getElementById('active-troop-count');
+            if(countEl) countEl.innerText = activeTroops;
+        }
+
+        function checkFriction() {
+            if(!map.hasLayer(heatLayerGroup)) return; 
+            const hasHeat = heatLayer._latlngs.length > 0;
+            const frictionLabel = document.getElementById('friction-level');
+            if (hasHeat) {
+                const maxIntensity = heatLayer._latlngs.reduce((max, p) => Math.max(max, p[2]), 0);
+                frictionLabel.innerText = maxIntensity > 0.8 ? "HIGH DENSITY" : maxIntensity > 0.5 ? "MEDIUM DENSITY" : "LOW DENSITY";
+                frictionLabel.className = maxIntensity > 0.8 ? "text-red-600 font-bold animate-pulse" : maxIntensity > 0.5 ? "text-orange-500 font-bold" : "text-slate-800 font-bold";
+            } else {
+                frictionLabel.innerText = "Low"; frictionLabel.className = "text-slate-800";
             }
         }
 
+        function updateHeatmap(currentDate) {
+            // Safety check: Don't update if layer is hidden
+            if (!map.hasLayer(heatLayerGroup)) return;
+
+            let heatPoints = [];
+            let activeCount = 0;
+            const current = currentDate.getTime();
+            
+            popCenters.forEach(p => {
+                if (p.population > 60809) return; 
+                const staticIntensity = p.population / 60809; 
+                heatPoints.push([p.latlng[0], p.latlng[1], staticIntensity]);
+                for (let i = 0; i < 5; i++) heatPoints.push([p.latlng[0] + (Math.random()-0.5) * 0.02, p.latlng[1] + (Math.random()-0.5) * 0.02, staticIntensity * 0.3]);
+            });
+
+            events.forEach(evt => {
+                const start = evt.start.getTime();
+                const end = evt.end.getTime();
+                if (current >= start && current <= end) {
+                    activeCount++;
+                    if (evt.type === 'route-flow') {
+                        const route = routes.find(r => r.id === evt.routeId);
+                        if (route) {
+                            const totalDuration = end - start;
+                            const elapsed = current - start;
+                            let progress = elapsed / totalDuration; 
+                            let headPercent = (evt.direction === 'reverse') ? (1.0 - progress) : progress;
+                            const trailSteps = 20; 
+                            for (let i = 0; i < trailSteps; i++) {
+                                let trailFactor = i / trailSteps; 
+                                let pointPercent = (evt.direction === 'reverse') ? headPercent + (trailFactor * 0.2) : headPercent - (trailFactor * 0.2);
+                                if (pointPercent >= 0 && pointPercent <= 1) {
+                                    const pt = getPointAtPercent(route.points, pointPercent);
+                                    heatPoints.push([pt.lat, pt.lng, evt.intensity * (1 - trailFactor)]);
+                                }
+                            }
+                        }
+                    } else if (evt.type === 'static') {
+                        let intensity = evt.intensity || evt.maxIntensity || 1.0;
+                        heatPoints.push([evt.lat, evt.lng, intensity]);
+                        if (evt.spread) for(let i=0; i<8; i++) heatPoints.push([evt.lat + (Math.random()-0.5) * evt.spread, evt.lng + (Math.random()-0.5) * evt.spread, intensity * 0.7]);
+                    }
+                }
+            });
+            heatLayer.setLatLngs(heatPoints);
+            document.getElementById('active-event-count').innerText = activeCount;
+        }
+
+        // --- STARTUP ---
         window.onload = function() {
             initMapApp();
         };
